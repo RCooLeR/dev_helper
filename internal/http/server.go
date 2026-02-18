@@ -16,7 +16,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-//go:embed ui/*.html ui/*.css
+//go:embed ui/*.html ui/*.css ui/*.png
 var uiFS embed.FS
 
 type Server struct {

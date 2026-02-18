@@ -2,6 +2,7 @@ package provision
 
 import (
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -147,6 +148,21 @@ func Create(a *app.App, st *store.Store, req CreateRequest) (CreateResult, error
 	warnings := []string{}
 	if err := platform.AddHost(domain); err != nil {
 		warnings = append(warnings, "hosts: "+err.Error())
+	}
+
+	// Auto-issue HTTPS cert for the domain (mkcert). This keeps the nginx vhost consistent
+	// (it always references external/certs/<domain>/cert.pem + key.pem).
+	// If mkcert is not available or not yet installed, we surface it as a warning (project still created).
+	certPem := filepath.Join(hostCertDir, "cert.pem")
+	keyPem := filepath.Join(hostCertDir, "key.pem")
+	_, certErr := os.Stat(certPem)
+	_, keyErr := os.Stat(keyPem)
+	if errors.Is(certErr, os.ErrNotExist) || errors.Is(keyErr, os.ErrNotExist) {
+		if err := CertInit(cfg); err != nil {
+			warnings = append(warnings, "cert: "+err.Error())
+		} else if err := CertIssue(cfg, domain); err != nil {
+			warnings = append(warnings, "cert: "+err.Error())
+		}
 	}
 
 	dbName, dbUser, dbPass := "", "", ""

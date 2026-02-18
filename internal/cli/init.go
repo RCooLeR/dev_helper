@@ -31,6 +31,11 @@ func cmdInit(a *app.App) *cli.Command {
 			cfg.RootDir = cctx.String("wsl-root")
 			cfg.HostMirrorDir = cctx.String("host-mirror")
 			cfg.ComposeDir = cctx.String("compose-dir")
+			// Keep compose_dir stable and derived from the repo location unless the user explicitly overrides it.
+			// This prevents accidental "compose_dir points somewhere else" when the app is started from a different CWD.
+			if runtime.GOOS == "windows" && !cctx.IsSet("compose-dir") {
+				cfg.ComposeDir = filepath.Join(a.RepoRoot, "projects")
+			}
 			cfg.MySQLCli = cctx.String("mysql-cli")
 			cfg.PSQLCli = cctx.String("psql-cli")
 			cfg.MkcertCli = cctx.String("mkcert-cli")
