@@ -32,6 +32,7 @@
             <strong>{{.Company}} / {{.Name}}</strong>
             <div class="small">{{.Type}} • PHP {{.PHP}} • DB: {{.DB}}</div>
             <div class="small">Domain: <code>{{.Domain}}</code></div>
+            <div class="small"><a href="#" onclick="dropProject('{{.Company}}','{{.Name}}'); return false;">Drop</a></div>
           </div>
           <div style="text-align:right">
             <div class="small">Nginx conf:</div>
@@ -78,6 +79,17 @@ async function postJSON(url, body){
     if(!res.ok){ out.innerHTML = '<span class="warn">Error: '+(data.error||res.statusText)+'</span>'; return; }
     out.textContent = 'OK';
   }catch(e){ out.innerHTML = '<span class="warn">'+e.toString()+'</span>'; }
+}
+
+async function dropProject(company, project){
+  if(!confirm('Drop project '+company+'/'+project+'? This removes dirs, nginx conf, certs and drops DB.')) return;
+  try{
+    const res = await fetch('/api/projects/drop', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({company, project})});
+    const data = await res.json();
+    if(!res.ok){ alert('Error: '+(data.error||res.statusText)); return; }
+    if(data.warnings && data.warnings.length){ alert('Dropped with warnings:\n\n'+data.warnings.join('\n')); }
+    location.reload();
+  }catch(e){ alert(e.toString()); }
 }
 </script>
 </body>

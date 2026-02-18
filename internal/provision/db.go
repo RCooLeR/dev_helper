@@ -162,23 +162,55 @@ func CreatePostgresDB(cfg app.Config, dbName, user, pass string) error {
 		return err
 	}
 
-	// Create role if missing + create DB if missing.
-	sqlRole := fmt.Sprintf("DO $$BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '%s') THEN CREATE ROLE %s LOGIN PASSWORD '%s'; END IF; END$$;", user, user, pass)
-	sqlDB := fmt.Sprintf("DO $$BEGIN IF NOT EXISTS (SELECT FROM pg_database WHERE datname = '%s') THEN EXECUTE format('CREATE DATABASE %%I OWNER %%I', '%s', '%s'); END IF; END$$;", dbName, dbName, user)
-
-	cmd := exec.Command(psqlExe(cfg),
+	// Create role if missing (safe inside DO).
+	sqlRole := fmt.Sprintf(
+		"DO $$BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '%s') THEN CREATE ROLE %s LOGIN PASSWORD '%s'; END IF; END$$;",
+		user, user, pass,
+	)
+	cmdRole := exec.Command(psqlExe(cfg),
 		"-h", cfg.PostgresHost,
 		"-p", fmt.Sprintf("%d", cfg.PostgresPort),
 		"-U", "postgres",
 		"-d", "postgres",
 		"-v", "ON_ERROR_STOP=1",
 		"-c", sqlRole,
-		"-c", sqlDB,
 	)
-	cmd.Env = append(os.Environ(), "PGPASSWORD="+cfg.PostgresSuperPass)
-	out, err := cmd.CombinedOutput()
+	cmdRole.Env = append(os.Environ(), "PGPASSWORD="+cfg.PostgresSuperPass)
+	out, err := cmdRole.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("postgres create failed: %w; %s", err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("postgres create role failed: %w; %s", err, strings.TrimSpace(string(out)))
+	}
+
+	// CREATE DATABASE cannot run inside a function/transaction, so we do existence check in Go
+	// and then run plain CREATE DATABASE as a separate statement.
+	cmdCheck := exec.Command(psqlExe(cfg),
+		"-h", cfg.PostgresHost,
+		"-p", fmt.Sprintf("%d", cfg.PostgresPort),
+		"-U", "postgres",
+		"-d", "postgres",
+		"-tAc", fmt.Sprintf("SELECT 1 FROM pg_database WHERE datname='%s'", dbName),
+	)
+	cmdCheck.Env = append(os.Environ(), "PGPASSWORD="+cfg.PostgresSuperPass)
+	chkOut, err := cmdCheck.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("postgres db exists check failed: %w; %s", err, strings.TrimSpace(string(chkOut)))
+	}
+	if strings.TrimSpace(string(chkOut)) != "" {
+		return nil
+	}
+
+	cmdDB := exec.Command(psqlExe(cfg),
+		"-h", cfg.PostgresHost,
+		"-p", fmt.Sprintf("%d", cfg.PostgresPort),
+		"-U", "postgres",
+		"-d", "postgres",
+		"-v", "ON_ERROR_STOP=1",
+		"-c", fmt.Sprintf("CREATE DATABASE %s OWNER %s", dbName, user),
+	)
+	cmdDB.Env = append(os.Environ(), "PGPASSWORD="+cfg.PostgresSuperPass)
+	out, err = cmdDB.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("postgres create db failed: %w; %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
@@ -190,6 +222,93 @@ func createDB(cfg app.Config, engine, dbName, user, pass string) error {
 		return CreateMySQLDB(cfg, dbName, user, pass)
 	case "postgres":
 		return CreatePostgresDB(cfg, dbName, user, pass)
+	default:
+		return fmt.Errorf("unknown engine: %s", engine)
+	}
+}
+
+func DropMySQLDB(cfg app.Config, dbName, user string) error {
+	if err := ensureServiceUp(cfg, cfg.MySQLService); err != nil {
+		return err
+	}
+	if err := waitMySQLReady(cfg); err != nil {
+		return err
+	}
+	sql := strings.Join([]string{
+		fmt.Sprintf("DROP DATABASE IF EXISTS `%s`;", dbName),
+		fmt.Sprintf("DROP USER IF EXISTS '%s'@'%%';", user),
+		"FLUSH PRIVILEGES;",
+	}, " ")
+
+	args := []string{
+		"--protocol=tcp",
+		"-h", cfg.MySQLHost,
+		"-P", fmt.Sprintf("%d", cfg.MySQLPort),
+		"-uroot",
+		"-p" + cfg.MySQLRootPass,
+		"-e", sql,
+	}
+	cmd := exec.Command(mysqlExe(cfg), args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("mysql drop failed: %w; %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func DropPostgresDB(cfg app.Config, dbName, user string) error {
+	if err := ensureServiceUp(cfg, cfg.PostgresService); err != nil {
+		return err
+	}
+	if err := waitPostgresReady(cfg); err != nil {
+		return err
+	}
+
+	baseArgs := []string{
+		"-h", cfg.PostgresHost,
+		"-p", fmt.Sprintf("%d", cfg.PostgresPort),
+		"-U", "postgres",
+		"-d", "postgres",
+		"-v", "ON_ERROR_STOP=1",
+	}
+
+	// Terminate any open connections to the DB (required before DROP DATABASE).
+	cmdTerm := exec.Command(psqlExe(cfg), append(baseArgs,
+		"-c", fmt.Sprintf("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='%s' AND pid <> pg_backend_pid();", dbName),
+	)...)
+	cmdTerm.Env = append(os.Environ(), "PGPASSWORD="+cfg.PostgresSuperPass)
+	_, _ = cmdTerm.CombinedOutput() // best-effort
+
+	// Drop database (cannot run inside a function/transaction).
+	cmdDB := exec.Command(psqlExe(cfg), append(baseArgs,
+		"-c", fmt.Sprintf("DROP DATABASE IF EXISTS %s;", dbName),
+	)...)
+	cmdDB.Env = append(os.Environ(), "PGPASSWORD="+cfg.PostgresSuperPass)
+	out, err := cmdDB.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("postgres drop db failed: %w; %s", err, strings.TrimSpace(string(out)))
+	}
+
+	// Drop role if exists.
+	sqlRole := fmt.Sprintf("DO $$BEGIN IF EXISTS (SELECT FROM pg_roles WHERE rolname='%s') THEN DROP ROLE %s; END IF; END$$;", user, user)
+	cmdRole := exec.Command(psqlExe(cfg), append(baseArgs,
+		"-c", sqlRole,
+	)...)
+	cmdRole.Env = append(os.Environ(), "PGPASSWORD="+cfg.PostgresSuperPass)
+	out, err = cmdRole.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("postgres drop role failed: %w; %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func dropDB(cfg app.Config, engine, dbName, user string) error {
+	engine = strings.ToLower(strings.TrimSpace(engine))
+	switch engine {
+	case "mysql":
+		return DropMySQLDB(cfg, dbName, user)
+	case "postgres":
+		return DropPostgresDB(cfg, dbName, user)
 	default:
 		return fmt.Errorf("unknown engine: %s", engine)
 	}

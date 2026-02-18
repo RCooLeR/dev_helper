@@ -51,6 +51,31 @@ func cmdProject(a *app.App) *cli.Command {
 				},
 			},
 			{
+				Name:  "drop",
+				Usage: "Drop a project (dirs, nginx conf, certs, hosts, db)",
+				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "company", Required: true},
+					&cli.StringFlag{Name: "project", Required: true},
+				},
+				Action: func(cctx *cli.Context) error {
+					cfg := a.Cfg
+					st, err := store.Open(platform.WSLToHost(cfg, cfg.StoreFile))
+					if err != nil {
+						return err
+					}
+					res, err := provision.Drop(a, st, provision.DropRequest{
+						Company: cctx.String("company"),
+						Project: cctx.String("project"),
+					})
+					if err != nil {
+						return err
+					}
+					b, _ := json.MarshalIndent(map[string]any{"ok": true, "warnings": res.Warnings}, "", "  ")
+					fmt.Println(string(b))
+					return nil
+				},
+			},
+			{
 				Name:  "list",
 				Usage: "List projects",
 				Action: func(cctx *cli.Context) error {

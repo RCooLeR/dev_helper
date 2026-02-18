@@ -122,3 +122,18 @@ func (s *Store) Upsert(p Project) (Project, error) {
 	s.st.Projects = append(s.st.Projects, p)
 	return p, s.saveLocked()
 }
+
+// Delete removes a project from the store.
+// It returns the deleted project and whether it existed.
+func (s *Store) Delete(company, project string) (Project, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, p := range s.st.Projects {
+		if p.Company == company && p.Name == project {
+			// remove index i
+			s.st.Projects = append(s.st.Projects[:i], s.st.Projects[i+1:]...)
+			return p, true, s.saveLocked()
+		}
+	}
+	return Project{}, false, nil
+}

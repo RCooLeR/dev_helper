@@ -43,6 +43,7 @@ func (s *Server) Router() http.Handler {
 	r.Route("/api", func(api chi.Router) {
 		api.Get("/projects", s.apiList)
 		api.Post("/projects", s.apiCreate)
+		api.Post("/projects/drop", s.apiDrop)
 		api.Post("/projects/import", s.apiImport)
 		api.Post("/cert/init", s.apiCertInit)
 		api.Post("/cert/issue", s.apiCertIssue)
@@ -118,6 +119,28 @@ func (s *Server) apiCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"project": res.Project, "warnings": res.Warnings})
+}
+
+type dropReq struct {
+	Company string `json:"company"`
+	Project string `json:"project"`
+}
+
+func (s *Server) apiDrop(w http.ResponseWriter, r *http.Request) {
+	var req dropReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, map[string]any{"error": "bad json"})
+		return
+	}
+	res, err := provision.Drop(s.App, s.Store, provision.DropRequest{
+		Company: req.Company,
+		Project: req.Project,
+	})
+	if err != nil {
+		writeJSON(w, 400, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "warnings": res.Warnings})
 }
 
 type importReq struct {

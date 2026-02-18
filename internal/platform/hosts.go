@@ -60,3 +60,36 @@ func AddHost(domain string) error {
 	}
 	return nil
 }
+
+// RemoveHost removes previously added devhelper host entries for a domain.
+// It only removes lines that contain both the domain and the "devhelper" marker.
+func RemoveHost(domain string) error {
+	domain = strings.TrimSpace(domain)
+	if domain == "" {
+		return nil
+	}
+
+	p := hostsPath()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return fmt.Errorf("read hosts (%s): %w", p, err)
+	}
+
+	lines := strings.Split(string(b), "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if strings.Contains(line, domain) && strings.Contains(line, "devhelper") {
+			continue
+		}
+		out = append(out, line)
+	}
+
+	nb := []byte(strings.Join(out, "\n"))
+	if err := os.WriteFile(p, nb, 0o644); err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return fmt.Errorf("write hosts (%s): permission denied (run as admin/sudo)", p)
+		}
+		return fmt.Errorf("write hosts (%s): %w", p, err)
+	}
+	return nil
+}
