@@ -1,0 +1,155 @@
+package app
+
+import (
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
+)
+
+type Config struct {
+	// Runtime root (WSL path when running on Windows, regular host path on Linux/macOS)
+	RootDir       string `json:"root_dir"`
+	HostMirrorDir string `json:"host_mirror_dir,omitempty"` // Windows UNC path to WSL root (\\wsl$\\...); used for file operations
+	WSLDistro     string `json:"wsl_distro,omitempty"`      // kept for future use; not required for DB ops
+
+	// Project/runtime directories (WSL paths on Windows; host paths on Linux/macOS)
+	AppsRoot          string `json:"apps_root"`
+	DataRoot          string `json:"data_root"`
+	NginxConfRoot     string `json:"nginx_conf_root"`
+	NginxExternalRoot string `json:"nginx_external_root"`
+
+	// Where docker-compose.yml lives (HOST path on Windows, e.g. E:\Development\projects)
+	ComposeDir string `json:"compose_dir"`
+
+	DefaultDomainPattern string `json:"default_domain_pattern"`
+
+	// Docker compose service names (used to bring DB containers up)
+	MySQLService    string `json:"mysql_service"`
+	PostgresService string `json:"postgres_service"`
+
+	// DB access from HOST (Windows) via TCP
+	MySQLHost     string `json:"mysql_host"`
+	MySQLPort     int    `json:"mysql_port"`
+	MySQLRootPass string `json:"mysql_root_pass"`
+	MySQLCli      string `json:"mysql_cli"` // full path to mysql.exe (recommended) or empty to use PATH
+
+	PostgresHost      string `json:"postgres_host"`
+	PostgresPort      int    `json:"postgres_port"`
+	PostgresSuperPass string `json:"postgres_super_pass"`
+	PSQLCli           string `json:"psql_cli"` // full path to psql.exe (recommended) or empty to use PATH
+
+	// Tools executed on HOST
+	DockerCli string `json:"docker_cli"` // docker.exe or docker (PATH); default "docker"
+	MkcertCli string `json:"mkcert_cli"` // mkcert.exe or mkcert (PATH); default "mkcert"
+
+	StoreFile string `json:"store_file"`
+	LogLevel  string `json:"log_level"`
+}
+
+func DefaultConfig(repoRoot string) Config {
+	c := Config{
+		DefaultDomainPattern: "<project>.<company>.local",
+		MySQLService:         "mysql",
+		PostgresService:      "postgres",
+		MySQLHost:            "127.0.0.1",
+		MySQLPort:            3306,
+		MySQLRootPass:        "change-me",
+		PostgresHost:         "127.0.0.1",
+		PostgresPort:         5432,
+		PostgresSuperPass:    "change-me",
+		DockerCli:            "docker",
+		MkcertCli:            "mkcert",
+		LogLevel:             "debug",
+	}
+
+	// On Linux/macOS we keep everything inside the repo by default.
+	c.RootDir = filepath.Join(repoRoot, "projects")
+	c.ComposeDir = filepath.Join(repoRoot, "projects")
+	c.AppsRoot = filepath.Join(c.RootDir, "apps")
+	c.DataRoot = filepath.Join(c.RootDir, "data")
+	c.NginxConfRoot = filepath.Join(c.RootDir, "containers", "nginx", "conf.d")
+	c.NginxExternalRoot = filepath.Join(c.RootDir, "containers", "nginx", "external")
+	c.StoreFile = filepath.Join(c.DataRoot, "devhelper.store.json")
+
+	if runtime.GOOS == "windows" {
+		// Runtime lives in WSL filesystem for performance.
+		c.WSLDistro = "Ubuntu"
+		c.RootDir = "/data/dev-helper/projects"
+		c.HostMirrorDir = `\\wsl$\\Ubuntu\\data\\dev-helper\\projects`
+
+		c.AppsRoot = c.RootDir + "/apps"
+		c.DataRoot = c.RootDir + "/data"
+		c.NginxConfRoot = c.RootDir + "/containers/nginx/conf.d"
+		c.NginxExternalRoot = c.RootDir + "/containers/nginx/external"
+		c.StoreFile = c.DataRoot + "/devhelper.store.json"
+
+		// Compose file lives on Windows side in the repo.
+		c.ComposeDir = filepath.Join(repoRoot, "projects")
+	}
+
+	return c
+}
+
+func ConfigPath(repoRoot string) string {
+	// Keep config next to the executable/repo (same path on all OS for simplicity).
+	return filepath.Join(repoRoot, ".devhelper-config.json")
+}
+
+func LoadOrDefault(repoRoot string) (Config, bool, error) {
+	p := ConfigPath(repoRoot)
+	b, err := os.ReadFile(p)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return DefaultConfig(repoRoot), false, nil
+		}
+		return Config{}, false, err
+	}
+	var c Config
+	if err := json.Unmarshal(b, &c); err != nil {
+		return Config{}, false, err
+	}
+	// Apply defaults for new fields if they are missing in older configs.
+	def := DefaultConfig(repoRoot)
+	if c.DefaultDomainPattern == "" {
+		c.DefaultDomainPattern = def.DefaultDomainPattern
+	}
+	if c.MySQLService == "" {
+		c.MySQLService = def.MySQLService
+	}
+	if c.PostgresService == "" {
+		c.PostgresService = def.PostgresService
+	}
+	if c.MySQLHost == "" {
+		c.MySQLHost = def.MySQLHost
+	}
+	if c.MySQLPort == 0 {
+		c.MySQLPort = def.MySQLPort
+	}
+	if c.PostgresHost == "" {
+		c.PostgresHost = def.PostgresHost
+	}
+	if c.PostgresPort == 0 {
+		c.PostgresPort = def.PostgresPort
+	}
+	if c.DockerCli == "" {
+		c.DockerCli = def.DockerCli
+	}
+	if c.MkcertCli == "" {
+		c.MkcertCli = def.MkcertCli
+	}
+	if c.LogLevel == "" {
+		c.LogLevel = def.LogLevel
+	}
+	return c, true, nil
+}
+
+func Save(repoRoot string, c Config) error {
+	p := ConfigPath(repoRoot)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return err
+	}
+	b, _ := json.MarshalIndent(c, "", "  ")
+	return os.WriteFile(p, b, 0o644)
+}

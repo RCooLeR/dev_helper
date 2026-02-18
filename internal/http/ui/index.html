@@ -1,0 +1,82 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>devhelper</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<header>
+  <div class="row" style="align-items:center">
+    <div><strong>devhelper</strong> <span class="small">local PHP env helper</span></div>
+    <div style="text-align:right"><a href="/new">+ New project</a></div>
+  </div>
+</header>
+
+<main>
+  <div class="card">
+    <div class="small">
+      Runtime root: <code>{{.Cfg.RootDir}}</code>
+      {{if .Cfg.HostMirrorDir}}<br/>Host mirror: <code>{{.Cfg.HostMirrorDir}}</code>{{end}}
+    </div>
+  </div>
+
+  {{if .Projects}}
+    {{range .Projects}}
+      <div class="card">
+        <div class="row">
+          <div>
+            <strong>{{.Company}} / {{.Name}}</strong>
+            <div class="small">{{.Type}} • PHP {{.PHP}} • DB: {{.DB}}</div>
+            <div class="small">Domain: <code>{{.Domain}}</code></div>
+          </div>
+          <div style="text-align:right">
+            <div class="small">Nginx conf:</div>
+            <div class="small"><code>{{.NginxConf}}</code></div>
+          </div>
+        </div>
+        <details style="margin-top:10px">
+          <summary>Credentials & paths</summary>
+          <pre>{
+  "domain": "{{.Domain}}",
+  "php": "{{.PHP}}",
+  "db": "{{.DB}}",
+  "db_name": "{{.DBName}}",
+  "db_user": "{{.DBUser}}",
+  "db_pass": "{{.DBPass}}",
+  "runtime_path": "{{.RootPath}}",
+  "host_path": "{{.HostPath}}"
+}</pre>
+        </details>
+      </div>
+    {{end}}
+  {{else}}
+    <div class="card">No projects yet. <a href="/new">Create one</a>.</div>
+  {{end}}
+
+  <div class="card">
+    <strong>Certs</strong>
+    <div class="small">Uses mkcert. Install it on your host first.</div>
+    <div class="row" style="margin-top:10px">
+      <div><button class="secondary" onclick="postJSON('/api/cert/init', {})">mkcert install CA</button></div>
+      <div><input id="certDomain" placeholder="domain (e.g. example-project.example-company.local)" /></div>
+      <div><button onclick="postJSON('/api/cert/issue', {domain: document.getElementById('certDomain').value})">Issue cert</button></div>
+    </div>
+    <div id="certOut" class="small" style="margin-top:10px"></div>
+  </div>
+</main>
+
+<script>
+async function postJSON(url, body){
+  const out = document.getElementById('certOut');
+  try{
+    const res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const data = await res.json();
+    if(!res.ok){ out.innerHTML = '<span class="warn">Error: '+(data.error||res.statusText)+'</span>'; return; }
+    out.textContent = 'OK';
+  }catch(e){ out.innerHTML = '<span class="warn">'+e.toString()+'</span>'; }
+}
+</script>
+</body>
+</html>
