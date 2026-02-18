@@ -54,7 +54,7 @@ docker compose up -d --build
 ```
 
 ## 4) Run Web UI
-From repo root (Windows):
+From repo root (Windows) as admin user so certs work:
 
 ```powershell
 devhelper.exe serve --addr 127.0.0.1:8787
