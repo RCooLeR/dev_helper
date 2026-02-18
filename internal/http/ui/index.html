@@ -52,6 +52,20 @@
   "host_path": "{{.HostPath}}"
 }</pre>
         </details>
+
+<div style="margin-top:10px">
+  <div class="small">DB dump import (host path)</div>
+  <div class="row" style="gap:8px; align-items:flex-end; margin-top:6px">
+    <div style="flex:2">
+      <input id="imp_{{.ID}}" placeholder="E:\dumps\project.sql" />
+    </div>
+    <div style="flex:1; text-align:right">
+      <button class="secondary" onclick="importDump('{{.ID}}','{{.Company}}','{{.Name}}', document.getElementById('imp_{{.ID}}').value, false); return false;">Import</button>
+      <button onclick="importDump('{{.ID}}','{{.Company}}','{{.Name}}', document.getElementById('imp_{{.ID}}').value, true); return false;">Replace</button>
+    </div>
+  </div>
+  <div id="imp_out_{{.ID}}" class="small" style="margin-top:6px"></div>
+</div>
       </div>
     {{end}}
   {{else}}
@@ -71,7 +85,31 @@
 </main>
 
 <script>
+async function importDump(id, company, project, file, replace){
+  const out = document.getElementById('imp_out_'+id);
+  if(!file){ if(out) out.innerHTML = '<span class="warn">Dump file is required</span>'; return; }
+  if(replace){
+    if(!confirm('Replace DB for '+company+'/'+project+'? This will DROP and recreate the database.')) return;
+  }
+  try{
+    const res = await fetch('/api/projects/import', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({company, project, file, replace})
+    });
+    const data = await res.json();
+    if(!res.ok){
+      if(out) out.innerHTML = '<span class="warn">Error: '+(data.error||res.statusText)+'</span>';
+      return;
+    }
+    if(out) out.textContent = replace ? 'Replaced + imported.' : 'Imported.';
+  }catch(e){
+    if(out) out.innerHTML = '<span class="warn">'+e.toString()+'</span>';
+  }
+}
+
 async function postJSON(url, body){
+
   const out = document.getElementById('certOut');
   try{
     const res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});

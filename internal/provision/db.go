@@ -314,6 +314,19 @@ func dropDB(cfg app.Config, engine, dbName, user string) error {
 	}
 }
 
+// ReplaceSQL drops the project's DB (and role/user), recreates it, and imports the given SQL dump.
+// This is useful when you want to "reset" a project to a known state.
+func ReplaceSQL(cfg app.Config, engine, dbName, dbUser, dbPass, dumpFile string) error {
+	engine = strings.ToLower(strings.TrimSpace(engine))
+	if err := dropDB(cfg, engine, dbName, dbUser); err != nil {
+		return err
+	}
+	if err := createDB(cfg, engine, dbName, dbUser, dbPass); err != nil {
+		return err
+	}
+	return ImportSQL(cfg, engine, dbName, dumpFile)
+}
+
 func ImportSQL(cfg app.Config, engine, dbName, dumpFile string) error {
 	engine = strings.ToLower(strings.TrimSpace(engine))
 	dumpFile = strings.TrimSpace(dumpFile)

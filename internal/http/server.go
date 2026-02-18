@@ -98,6 +98,10 @@ type createReq struct {
 	Domain  string `json:"domain"`
 	PHP     string `json:"php"`
 	DB      string `json:"db"`
+
+	// Optional DB import on create (host file path)
+	ImportFile     string `json:"import_file"`
+	ImportOnCreate bool   `json:"import_on_create"`
 }
 
 func (s *Server) apiCreate(w http.ResponseWriter, r *http.Request) {
@@ -107,12 +111,14 @@ func (s *Server) apiCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res, err := provision.Create(s.App, s.Store, provision.CreateRequest{
-		Company: req.Company,
-		Project: req.Project,
-		Type:    req.Type,
-		Domain:  req.Domain,
-		PHP:     req.PHP,
-		DB:      req.DB,
+		Company:        req.Company,
+		Project:        req.Project,
+		Type:           req.Type,
+		Domain:         req.Domain,
+		PHP:            req.PHP,
+		DB:             req.DB,
+		ImportFile:     req.ImportFile,
+		ImportOnCreate: req.ImportOnCreate,
 	})
 	if err != nil {
 		writeJSON(w, 400, map[string]any{"error": err.Error()})
@@ -147,6 +153,7 @@ type importReq struct {
 	Company string `json:"company"`
 	Project string `json:"project"`
 	File    string `json:"file"`
+	Replace bool   `json:"replace"`
 }
 
 func (s *Server) apiImport(w http.ResponseWriter, r *http.Request) {
@@ -164,9 +171,16 @@ func (s *Server) apiImport(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]any{"error": "project has no db"})
 		return
 	}
-	if err := provision.ImportSQL(s.App.Cfg, p.DB, p.DBName, req.File); err != nil {
-		writeJSON(w, 400, map[string]any{"error": err.Error()})
-		return
+	if req.Replace {
+		if err := provision.ReplaceSQL(s.App.Cfg, p.DB, p.DBName, p.DBUser, p.DBPass, req.File); err != nil {
+			writeJSON(w, 400, map[string]any{"error": err.Error()})
+			return
+		}
+	} else {
+		if err := provision.ImportSQL(s.App.Cfg, p.DB, p.DBName, req.File); err != nil {
+			writeJSON(w, 400, map[string]any{"error": err.Error()})
+			return
+		}
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
 }

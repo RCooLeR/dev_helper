@@ -27,6 +27,8 @@ func cmdProject(a *app.App) *cli.Command {
 					&cli.StringFlag{Name: "domain"},
 					&cli.StringFlag{Name: "php", Value: "8.3"},
 					&cli.StringFlag{Name: "db", Value: "none"},
+					&cli.StringFlag{Name: "import-file"},
+					&cli.BoolFlag{Name: "import"},
 				},
 				Action: func(cctx *cli.Context) error {
 					cfg := a.Cfg
@@ -35,12 +37,14 @@ func cmdProject(a *app.App) *cli.Command {
 						return err
 					}
 					res, err := provision.Create(a, st, provision.CreateRequest{
-						Company: cctx.String("company"),
-						Project: cctx.String("project"),
-						Type:    cctx.String("type"),
-						Domain:  cctx.String("domain"),
-						PHP:     cctx.String("php"),
-						DB:      cctx.String("db"),
+						Company:        cctx.String("company"),
+						Project:        cctx.String("project"),
+						Type:           cctx.String("type"),
+						Domain:         cctx.String("domain"),
+						PHP:            cctx.String("php"),
+						DB:             cctx.String("db"),
+						ImportFile:     cctx.String("import-file"),
+						ImportOnCreate: cctx.Bool("import"),
 					})
 					if err != nil {
 						return err

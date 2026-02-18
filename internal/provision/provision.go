@@ -23,6 +23,10 @@ type CreateRequest struct {
 	Domain  string
 	PHP     string
 	DB      string
+
+	// Optional: import SQL dump after project creation (host file path)
+	ImportFile     string
+	ImportOnCreate bool
 }
 
 type CreateResult struct {
@@ -176,6 +180,13 @@ func Create(a *app.App, st *store.Store, req CreateRequest) (CreateResult, error
 		}
 	} else {
 		db = "none"
+	}
+
+	// Optional: import dump after create (using superuser/root over TCP from host).
+	if db != "none" && req.ImportOnCreate && strings.TrimSpace(req.ImportFile) != "" {
+		if err := ImportSQL(cfg, db, dbName, req.ImportFile); err != nil {
+			warnings = append(warnings, "db import: "+err.Error())
+		}
 	}
 
 	p := store.Project{

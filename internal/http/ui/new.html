@@ -53,7 +53,25 @@
           <option value="postgres">postgres</option>
         </select>
       </div>
-      <div>
+      
+<div style="grid-column: 1 / -1; margin-top: 10px;">
+  <div class="small">Optional: import SQL dump after create (host path)</div>
+  <div class="row" style="margin-top:8px">
+    <div style="flex:2">
+      <label>Dump file (.sql)</label>
+      <input id="import_file" placeholder="E:\dumps\project.sql" />
+    </div>
+    <div style="flex:1">
+      <label>&nbsp;</label>
+      <div class="row" style="align-items:center; gap:8px">
+        <input type="checkbox" id="import_on_create" />
+        <span class="small">Import after create</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div>
         <label>Domain (optional)</label>
         <input id="domain" placeholder="default: <project>.<company>.local" />
         <div class="small">Default pattern: <code>{{.DefaultPattern}}</code></div>
@@ -79,7 +97,9 @@ async function create(){
     type: document.getElementById('type').value,
     php: document.getElementById('php').value,
     db: document.getElementById('db').value,
-    domain: document.getElementById('domain').value
+    domain: document.getElementById('domain').value,
+    import_file: document.getElementById('import_file').value,
+    import_on_create: document.getElementById('import_on_create').checked
   };
   const res = await fetch('/api/projects', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
   const data = await res.json();
