@@ -49,7 +49,7 @@ server {
     client_max_body_size {{.ClientMaxBody}};
 
     location ~ \.php$ {
-proxy_read_timeout 1000;
+		proxy_read_timeout 1000;
     	fastcgi_read_timeout 1000;
         fastcgi_split_path_info ^(.+\.php)(/.+)$;
         fastcgi_pass {{.PHPUpstream}};

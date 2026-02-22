@@ -1,16 +1,16 @@
-body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,sans-serif;margin:0;padding:0;background:#0b0b0c;color:#eaeaea}
-a{color:#8fd3ff;text-decoration:none}
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,sans-serif;margin:0;padding:0;background:#fefefe;color:#0b0b0c}
+a{color: #0393ef;text-decoration:none}
 a:hover{text-decoration:underline}
-header{padding:16px 20px;border-bottom:1px solid #222;background:#0f0f11;position:sticky;top:0}
+header{padding:16px 20px;border-bottom:1px solid #ccc;background:#eaeaea;position:sticky;top:0}
 main{padding:20px;max-width:1100px;margin:0 auto}
-.card{border:1px solid #222;border-radius:12px;padding:14px;margin:12px 0;background:#111}
+.card{border:1px solid #ccc;border-radius:12px;padding:14px;margin:12px 0;background:#eee}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-label{display:block;margin:8px 0 4px;color:#cfcfcf}
-input,select,button{width:100%;padding:10px;border-radius:10px;border:1px solid #333;background:#0c0c0e;color:#fff}
-button{cursor:pointer;background:#1d4ed8;border-color:#1d4ed8}
-button.secondary{background:#222;border-color:#333}
+label{display:block;margin:8px 0 4px;color:#111}
+input,select,button{width:100%;padding:10px;border-radius:0;border:1px solid #111;background:#fff;color:#0c0c0e}
+button{cursor:pointer;background:#1d4ed8;border-color:#1d4ed8;color:#fff}
+button.secondary{background:#ebebeb;border-color:#ccc;color:#0c0c0e}
 .row{display:flex;gap:12px}
 .row>div{flex:1}
-.small{font-size:12px;color:#aaa}
+.small{font-size:12px;color:#0c0c0e}
 .warn{color:#ffcc66}
-pre{white-space:pre-wrap;background:#0c0c0e;border:1px solid #222;border-radius:12px;padding:12px}
+pre{white-space:pre-wrap;background:#eaeaea;border:1px solid #222;border-radius:12px;padding:12px}

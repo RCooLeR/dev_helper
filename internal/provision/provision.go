@@ -14,6 +14,8 @@ import (
 	"devhelper/internal/platform"
 	"devhelper/internal/store"
 	"devhelper/internal/templates"
+
+	"github.com/rs/zerolog/log"
 )
 
 type CreateRequest struct {
@@ -90,7 +92,7 @@ func Create(a *app.App, st *store.Store, req CreateRequest) (CreateResult, error
 	if domain == "" {
 		domain = defaultDomain(cfg.DefaultDomainPattern, company, project)
 	}
-
+	log.Info().Msgf("Creating project %s/%s with domain %s", company, project, domain)
 	phpSvc := phpServiceName(req.PHP)
 	phpUpstream := phpSvc + ":9000"
 
@@ -111,7 +113,7 @@ func Create(a *app.App, st *store.Store, req CreateRequest) (CreateResult, error
 		_ = os.MkdirAll(winDir, 0o755)
 		_ = os.WriteFile(filepath.Join(winDir, ".wsl-path"), []byte(runtimeAppDir+"\n"), 0o644)
 	}
-
+	log.Info().Msg("Directories created")
 	confName := fmt.Sprintf("%s__%s.conf", company, project)
 	runtimeConfPath := filepath.ToSlash(filepath.Join(cfg.NginxConfRoot, confName))
 	hostConfPath := runtimeConfPath
@@ -125,7 +127,7 @@ func Create(a *app.App, st *store.Store, req CreateRequest) (CreateResult, error
 		hostCertDir = platform.WSLToHost(cfg, certDirRuntime)
 	}
 	_ = os.MkdirAll(hostCertDir, 0o755)
-
+	log.Info().Msg("Cert directory created")
 	rendered, err := templates.RenderNginx(templates.NginxParams{
 		Domain:        domain,
 		Root:          "/var/www/apps/" + company + "/" + project,
@@ -141,6 +143,7 @@ func Create(a *app.App, st *store.Store, req CreateRequest) (CreateResult, error
 	if err != nil {
 		return CreateResult{}, err
 	}
+	log.Info().Msg("Nginx config rendered")
 
 	if err := os.MkdirAll(filepath.Dir(hostConfPath), 0o755); err != nil {
 		return CreateResult{}, err
@@ -168,7 +171,7 @@ func Create(a *app.App, st *store.Store, req CreateRequest) (CreateResult, error
 			warnings = append(warnings, "cert: "+err.Error())
 		}
 	}
-
+	log.Info().Msgf("Created cert.pem and key.pem for domain %s", domain)
 	dbName, dbUser, dbPass := "", "", ""
 	db := strings.ToLower(strings.TrimSpace(req.DB))
 	if db == "mysql" || db == "postgres" {
@@ -188,7 +191,7 @@ func Create(a *app.App, st *store.Store, req CreateRequest) (CreateResult, error
 			warnings = append(warnings, "db import: "+err.Error())
 		}
 	}
-
+	log.Info().Msgf("Created db %s", dbName)
 	p := store.Project{
 		Company:   company,
 		Name:      project,
@@ -207,5 +210,6 @@ func Create(a *app.App, st *store.Store, req CreateRequest) (CreateResult, error
 	if err != nil {
 		return CreateResult{}, err
 	}
+	log.Info().Msgf("Upserted project %s", p2.Name)
 	return CreateResult{Project: p2, Warnings: warnings}, nil
 }

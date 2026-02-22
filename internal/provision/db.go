@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"devhelper/internal/app"
+
+	"github.com/rs/zerolog/log"
 )
 
 func dockerCompose(cfg app.Config, args ...string) (string, error) {
@@ -137,7 +139,7 @@ func CreateMySQLDB(cfg app.Config, dbName, user, pass string) error {
 		fmt.Sprintf("GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'%%';", dbName, user),
 		"FLUSH PRIVILEGES;",
 	}, " ")
-
+	log.Info().Msgf("Creating MySQL database '%s' and user '%s'", dbName, user)
 	args := []string{
 		"--protocol=tcp",
 		"-h", cfg.MySQLHost,
@@ -149,8 +151,10 @@ func CreateMySQLDB(cfg app.Config, dbName, user, pass string) error {
 	cmd := exec.Command(mysqlExe(cfg), args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		log.Error().Err(err).Msgf("MySQL create failed: %s", strings.TrimSpace(string(out)))
 		return fmt.Errorf("mysql create failed: %w; %s", err, strings.TrimSpace(string(out)))
 	}
+	log.Info().Msgf("MySQL database '%s' and user '%s' created or already exist", dbName, user)
 	return nil
 }
 
@@ -161,7 +165,7 @@ func CreatePostgresDB(cfg app.Config, dbName, user, pass string) error {
 	if err := waitPostgresReady(cfg); err != nil {
 		return err
 	}
-
+	log.Info().Msgf("Creating Postgres database '%s' and user '%s'", dbName, user)
 	// Create role if missing (safe inside DO).
 	sqlRole := fmt.Sprintf(
 		"DO $$BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '%s') THEN CREATE ROLE %s LOGIN PASSWORD '%s'; END IF; END$$;",
@@ -178,6 +182,7 @@ func CreatePostgresDB(cfg app.Config, dbName, user, pass string) error {
 	cmdRole.Env = append(os.Environ(), "PGPASSWORD="+cfg.PostgresSuperPass)
 	out, err := cmdRole.CombinedOutput()
 	if err != nil {
+		log.Error().Err(err).Msgf("Postgres create role failed: %s", strings.TrimSpace(string(out)))
 		return fmt.Errorf("postgres create role failed: %w; %s", err, strings.TrimSpace(string(out)))
 	}
 
@@ -193,6 +198,7 @@ func CreatePostgresDB(cfg app.Config, dbName, user, pass string) error {
 	cmdCheck.Env = append(os.Environ(), "PGPASSWORD="+cfg.PostgresSuperPass)
 	chkOut, err := cmdCheck.CombinedOutput()
 	if err != nil {
+		log.Error().Err(err).Msgf("Postgres db exists check failed: %s", strings.TrimSpace(string(chkOut)))
 		return fmt.Errorf("postgres db exists check failed: %w; %s", err, strings.TrimSpace(string(chkOut)))
 	}
 	if strings.TrimSpace(string(chkOut)) != "" {
@@ -210,8 +216,10 @@ func CreatePostgresDB(cfg app.Config, dbName, user, pass string) error {
 	cmdDB.Env = append(os.Environ(), "PGPASSWORD="+cfg.PostgresSuperPass)
 	out, err = cmdDB.CombinedOutput()
 	if err != nil {
+		log.Error().Err(err).Msgf("Postgres create db failed: %s", strings.TrimSpace(string(out)))
 		return fmt.Errorf("postgres create db failed: %w; %s", err, strings.TrimSpace(string(out)))
 	}
+	log.Info().Msgf("Postgres database '%s' and user '%s' created or already exist", dbName, user)
 	return nil
 }
 

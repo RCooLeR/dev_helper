@@ -1,47 +1,49 @@
 <!doctype html>
 <html>
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>devhelper</title>
-  <link rel="stylesheet" href="/static/style.css" />
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>devhelper</title>
+    <link rel="stylesheet" href="/static/style.css"/>
 </head>
 <body>
 <header>
-  <div class="row" style="align-items:center">
-    <div><strong>devhelper</strong> <span class="small">local PHP env helper</span></div>
-    <div style="text-align:right"><a href="/new">+ New project</a></div>
-  </div>
+    <div class="row" style="align-items:center">
+        <div><strong>devhelper</strong> <span class="small">local PHP env helper</span></div>
+        <div style="text-align:right"><a href="/new">+ New project</a></div>
+    </div>
 </header>
 <div class="row" style="align-items:center;justify-content: center">
-  <img src="/static/dev-helper.png" alt="" width="200">
-</div>>
+    <img src="/static/dev-helper.png" alt="" width="200">
+</div>
+>
 <main>
-  <div class="card">
-    <div class="small">
-      Runtime root: <code>{{.Cfg.RootDir}}</code>
-      {{if .Cfg.HostMirrorDir}}<br/>Host mirror: <code>{{.Cfg.HostMirrorDir}}</code>{{end}}
+    <div class="card">
+        <div class="small">
+            Runtime root: <code>{{.Cfg.RootDir}}</code>
+            {{if .Cfg.HostMirrorDir}}<br/>Host mirror: <code>{{.Cfg.HostMirrorDir}}</code>{{end}}
+        </div>
     </div>
-  </div>
 
-  {{if .Projects}}
+    {{if .Projects}}
     {{range .Projects}}
-      <div class="card">
+    <div class="card">
         <div class="row">
-          <div>
-            <strong>{{.Company}} / {{.Name}}</strong>
-            <div class="small">{{.Type}} • PHP {{.PHP}} • DB: {{.DB}}</div>
-            <div class="small">Domain: <code>{{.Domain}}</code></div>
-            <div class="small"><a href="#" onclick="dropProject('{{.Company}}','{{.Name}}'); return false;">Drop</a></div>
-          </div>
-          <div style="text-align:right">
-            <div class="small">Nginx conf:</div>
-            <div class="small"><code>{{.NginxConf}}</code></div>
-          </div>
+            <div>
+                <strong>{{.Company}} / {{.Name}}</strong>
+                <div class="small">{{.Type}} • PHP {{.PHP}} • DB: {{.DB}}</div>
+                <div class="small">Domain: <code>{{.Domain}}</code></div>
+                <div class="small"><a href="#" onclick="dropProject('{{.Company}}','{{.Name}}'); return false;">Drop</a>
+                </div>
+            </div>
+            <div style="text-align:right">
+                <div class="small">Nginx conf:</div>
+                <div class="small"><code>{{.NginxConf}}</code></div>
+            </div>
         </div>
         <details style="margin-top:10px">
-          <summary>Credentials & paths</summary>
-          <pre>{
+            <summary>Credentials & paths</summary>
+            <pre>{
   "domain": "{{.Domain}}",
   "php": "{{.PHP}}",
   "db": "{{.DB}}",
@@ -53,82 +55,112 @@
 }</pre>
         </details>
 
-<div style="margin-top:10px">
-  <div class="small">DB dump import (host path)</div>
-  <div class="row" style="gap:8px; align-items:flex-end; margin-top:6px">
-    <div style="flex:2">
-      <input id="imp_{{.ID}}" placeholder="E:\dumps\project.sql" />
+        <div style="margin-top:10px">
+            <div class="small">DB dump import (host path)</div>
+            <div class="row" style="gap:8px; align-items:flex-end; margin-top:6px">
+                <div style="flex:2">
+                    <input id="imp_{{.ID}}" placeholder="E:\dumps\project.sql"/>
+                </div>
+                <div style="flex:1;text-align:right;display: flex;justify-content: end;">
+                    <button onclick="importDump('{{.ID}}','{{.Company}}','{{.Name}}', document.getElementById('imp_{{.ID}}').value, true); return false;">
+                        Import/Replace
+                    </button>
+                </div>
+            </div>
+            <div id="imp_out_{{.ID}}" class="small" style="margin-top:6px"></div>
+        </div>
     </div>
-    <div style="flex:1; text-align:right">
-      <button class="secondary" onclick="importDump('{{.ID}}','{{.Company}}','{{.Name}}', document.getElementById('imp_{{.ID}}').value, false); return false;">Import</button>
-      <button onclick="importDump('{{.ID}}','{{.Company}}','{{.Name}}', document.getElementById('imp_{{.ID}}').value, true); return false;">Replace</button>
-    </div>
-  </div>
-  <div id="imp_out_{{.ID}}" class="small" style="margin-top:6px"></div>
-</div>
-      </div>
     {{end}}
-  {{else}}
+    {{else}}
     <div class="card">No projects yet. <a href="/new">Create one</a>.</div>
-  {{end}}
+    {{end}}
 
-  <div class="card">
-    <strong>Certs</strong>
-    <div class="small">Uses mkcert. Install it on your host first.</div>
-    <div class="row" style="margin-top:10px">
-      <div><button class="secondary" onclick="postJSON('/api/cert/init', {})">mkcert install CA</button></div>
-      <div><input id="certDomain" placeholder="domain (e.g. example-project.example-company.local)" /></div>
-      <div><button onclick="postJSON('/api/cert/issue', {domain: document.getElementById('certDomain').value})">Issue cert</button></div>
+    <div class="card">
+        <strong>Certs</strong>
+        <div class="small">Uses mkcert. Install it on your host first.</div>
+        <div class="row" style="margin-top:10px">
+            <div>
+                <button class="secondary" onclick="postJSON('/api/cert/init', {})">mkcert install CA</button>
+            </div>
+            <div><input id="certDomain" placeholder="domain (e.g. example-project.example-company.local)"/></div>
+            <div>
+                <button onclick="postJSON('/api/cert/issue', {domain: document.getElementById('certDomain').value})">
+                    Issue cert
+                </button>
+            </div>
+        </div>
+        <div id="certOut" class="small" style="margin-top:10px"></div>
     </div>
-    <div id="certOut" class="small" style="margin-top:10px"></div>
-  </div>
 </main>
 
 <script>
-async function importDump(id, company, project, file, replace){
-  const out = document.getElementById('imp_out_'+id);
-  if(!file){ if(out) out.innerHTML = '<span class="warn">Dump file is required</span>'; return; }
-  if(replace){
-    if(!confirm('Replace DB for '+company+'/'+project+'? This will DROP and recreate the database.')) return;
-  }
-  try{
-    const res = await fetch('/api/projects/import', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({company, project, file, replace})
-    });
-    const data = await res.json();
-    if(!res.ok){
-      if(out) out.innerHTML = '<span class="warn">Error: '+(data.error||res.statusText)+'</span>';
-      return;
+    async function importDump(id, company, project, file, replace) {
+        const out = document.getElementById('imp_out_' + id);
+        if (!file) {
+            if (out) out.innerHTML = '<span class="warn">Dump file is required</span>';
+            return;
+        }
+        if (replace) {
+            if (!confirm('Replace DB for ' + company + '/' + project + '? This will DROP and recreate the database.')) return;
+        }
+        try {
+            const res = await fetch('/api/projects/import', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({company, project, file, replace})
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                if (out) out.innerHTML = '<span class="warn">Error: ' + (data.error || res.statusText) + '</span>';
+                return;
+            }
+            if (out) out.textContent = replace ? 'Replaced + imported.' : 'Imported.';
+        } catch (e) {
+            if (out) out.innerHTML = '<span class="warn">' + e.toString() + '</span>';
+        }
     }
-    if(out) out.textContent = replace ? 'Replaced + imported.' : 'Imported.';
-  }catch(e){
-    if(out) out.innerHTML = '<span class="warn">'+e.toString()+'</span>';
-  }
-}
 
-async function postJSON(url, body){
+    async function postJSON(url, body) {
 
-  const out = document.getElementById('certOut');
-  try{
-    const res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-    const data = await res.json();
-    if(!res.ok){ out.innerHTML = '<span class="warn">Error: '+(data.error||res.statusText)+'</span>'; return; }
-    out.textContent = 'OK';
-  }catch(e){ out.innerHTML = '<span class="warn">'+e.toString()+'</span>'; }
-}
+        const out = document.getElementById('certOut');
+        try {
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                out.innerHTML = '<span class="warn">Error: ' + (data.error || res.statusText) + '</span>';
+                return;
+            }
+            out.textContent = 'OK';
+        } catch (e) {
+            out.innerHTML = '<span class="warn">' + e.toString() + '</span>';
+        }
+    }
 
-async function dropProject(company, project){
-  if(!confirm('Drop project '+company+'/'+project+'? This removes dirs, nginx conf, certs and drops DB.')) return;
-  try{
-    const res = await fetch('/api/projects/drop', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({company, project})});
-    const data = await res.json();
-    if(!res.ok){ alert('Error: '+(data.error||res.statusText)); return; }
-    if(data.warnings && data.warnings.length){ alert('Dropped with warnings:\n\n'+data.warnings.join('\n')); }
-    location.reload();
-  }catch(e){ alert(e.toString()); }
-}
+    async function dropProject(company, project) {
+        if (!confirm('Drop project ' + company + '/' + project + '? This removes dirs, nginx conf, certs and drops DB.')) return;
+        try {
+            const res = await fetch('/api/projects/drop', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({company, project})
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                alert('Error: ' + (data.error || res.statusText));
+                return;
+            }
+            if (data.warnings && data.warnings.length) {
+                alert('Dropped with warnings:\n\n' + data.warnings.join('\n'));
+            }
+            location.reload();
+        } catch (e) {
+            alert(e.toString());
+        }
+    }
 </script>
 </body>
 </html>

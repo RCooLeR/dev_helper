@@ -10,14 +10,18 @@ import (
 
 	"devhelper/internal/app"
 	"devhelper/internal/platform"
+
+	"github.com/rs/zerolog/log"
 )
 
 func CertInit(cfg app.Config) error {
+	log.Info().Msg("CertInit called")
 	_, err := runHost(cfg.MkcertCli, "-install")
 	if err != nil {
+		log.Error().Err(err).Msg("mkcert -install failed")
 		return fmt.Errorf("mkcert -install failed: %w", err)
 	}
-
+	log.Info().Msg("CertInit succeeded")
 	certsDirRuntime := filepath.ToSlash(filepath.Join(cfg.NginxExternalRoot, "certs"))
 	hostCertsDir := certsDirRuntime
 	if runtime.GOOS == "windows" {
@@ -44,11 +48,13 @@ func CertIssue(cfg app.Config, domain string) error {
 
 	certFile := filepath.Join(hostCertDir, "cert.pem")
 	keyFile := filepath.Join(hostCertDir, "key.pem")
-
+	log.Info().Msgf("Creating cert.pem and key.pem for domain %s", domain)
 	_, err := runHost(cfg.MkcertCli, "-cert-file", certFile, "-key-file", keyFile, domain)
 	if err != nil {
+		log.Error().Err(err).Msg("mkcert -cert failed")
 		return fmt.Errorf("mkcert issue failed: %w", err)
 	}
+	log.Info().Msgf("Created cert.pem and key.pem for domain %s", domain)
 	return nil
 }
 

@@ -76,8 +76,8 @@ func DefaultConfig(repoRoot string) Config {
 	if runtime.GOOS == "windows" {
 		// Runtime lives in WSL filesystem for performance.
 		c.WSLDistro = "Ubuntu"
-		c.RootDir = "/data/dev-helper/projects"
-		c.HostMirrorDir = `\\wsl$\\Ubuntu\\data\\dev-helper\\projects`
+		c.RootDir = "/data/projects"
+		c.HostMirrorDir = `\\wsl$\\Ubuntu\\data\\projects`
 
 		c.AppsRoot = c.RootDir + "/apps"
 		c.DataRoot = c.RootDir + "/data"
