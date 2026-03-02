@@ -3,7 +3,6 @@ package httpserver
 import (
 	"embed"
 	"encoding/json"
-	"html/template"
 	"net/http"
 	"path"
 	"strings"
@@ -22,15 +21,10 @@ var uiFS embed.FS
 type Server struct {
 	App   *app.App
 	Store *store.Store
-	tpl   *template.Template
 }
 
 func New(a *app.App, st *store.Store) (*Server, error) {
-	tpl, err := template.ParseFS(uiFS, "ui/*.html")
-	if err != nil {
-		return nil, err
-	}
-	return &Server{App: a, Store: st, tpl: tpl}, nil
+	return &Server{App: a, Store: st}, nil
 }
 
 func (s *Server) Router() http.Handler {
@@ -38,7 +32,7 @@ func (s *Server) Router() http.Handler {
 	r.Use(middleware.Recoverer, middleware.RealIP, middleware.RequestID, middleware.Logger)
 
 	r.Get("/", s.pageIndex)
-	r.Get("/new", s.pageNew)
+	r.Get("/new", s.pageIndex)
 
 	r.Route("/api", func(api chi.Router) {
 		api.Get("/projects", s.apiList)
@@ -65,8 +59,18 @@ func (s *Server) Router() http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		if strings.HasSuffix(p, ".css") {
+		ext := strings.ToLower(path.Ext(p))
+		switch ext {
+		case ".css":
 			w.Header().Set("Content-Type", "text/css; charset=utf-8")
+		case ".png":
+			w.Header().Set("Content-Type", "image/png")
+		case ".svg":
+			w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
+		case ".jpg", ".jpeg":
+			w.Header().Set("Content-Type", "image/jpeg")
+		case ".ico":
+			w.Header().Set("Content-Type", "image/x-icon")
 		}
 		w.Write(b)
 	})
@@ -75,16 +79,13 @@ func (s *Server) Router() http.Handler {
 }
 
 func (s *Server) pageIndex(w http.ResponseWriter, r *http.Request) {
-	_ = s.tpl.ExecuteTemplate(w, "index.html", map[string]any{
-		"Projects": s.Store.List(),
-		"Cfg":      s.App.Cfg,
-	})
-}
-
-func (s *Server) pageNew(w http.ResponseWriter, r *http.Request) {
-	_ = s.tpl.ExecuteTemplate(w, "new.html", map[string]any{
-		"DefaultPattern": s.App.Cfg.DefaultDomainPattern,
-	})
+	b, err := uiFS.ReadFile("ui/index.html")
+	if err != nil {
+		http.Error(w, "index.html not found", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(b)
 }
 
 func (s *Server) apiList(w http.ResponseWriter, r *http.Request) {
