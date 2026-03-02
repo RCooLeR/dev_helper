@@ -174,7 +174,7 @@ func Create(a *app.App, st *store.Store, req CreateRequest) (CreateResult, error
 	log.Info().Msgf("Created cert.pem and key.pem for domain %s", domain)
 	dbName, dbUser, dbPass := "", "", ""
 	db := strings.ToLower(strings.TrimSpace(req.DB))
-	if db == "mysql" || db == "postgres" {
+	if db == "mysql" || db == "mysql9" || db == "mariadb10" || db == "mariadb12" || db == "postgres" {
 		dbName = dbIdent(company + "_" + project)
 		dbUser = dbIdent(project + "_u")
 		dbPass = randomPass(16)

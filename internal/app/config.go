@@ -26,12 +26,18 @@ type Config struct {
 	DefaultDomainPattern string `json:"default_domain_pattern"`
 
 	// Docker compose service names (used to bring DB containers up)
-	MySQLService    string `json:"mysql_service"`
-	PostgresService string `json:"postgres_service"`
+	MySQLService     string `json:"mysql_service"`
+	MySQL9Service    string `json:"mysql9_service"`
+	MariaDB10Service string `json:"mariadb10_service"`
+	MariaDB12Service string `json:"mariadb12_service"`
+	PostgresService  string `json:"postgres_service"`
 
 	// DB access from HOST (Windows) via TCP
 	MySQLHost     string `json:"mysql_host"`
 	MySQLPort     int    `json:"mysql_port"`
+	MySQL9Port    int    `json:"mysql9_port"`
+	MariaDB10Port int    `json:"mariadb10_port"`
+	MariaDB12Port int    `json:"mariadb12_port"`
 	MySQLRootPass string `json:"mysql_root_pass"`
 	MySQLCli      string `json:"mysql_cli"` // full path to mysql.exe (recommended) or empty to use PATH
 
@@ -52,12 +58,18 @@ func DefaultConfig(repoRoot string) Config {
 	c := Config{
 		DefaultDomainPattern: "<project>.<company>.local",
 		MySQLService:         "mysql",
+		MySQL9Service:        "mysql9",
+		MariaDB10Service:     "mariadb10",
+		MariaDB12Service:     "mariadb12",
 		PostgresService:      "postgres",
 		MySQLHost:            "127.0.0.1",
-		MySQLPort:            3306,
+		MySQLPort:            3384,
+		MySQL9Port:           3396,
+		MariaDB10Port:        33106,
+		MariaDB12Port:        3312,
 		MySQLRootPass:        "change-me",
 		PostgresHost:         "127.0.0.1",
-		PostgresPort:         5432,
+		PostgresPort:         5434,
 		PostgresSuperPass:    "change-me",
 		DockerCli:            "docker",
 		MkcertCli:            "mkcert",
@@ -118,6 +130,15 @@ func LoadOrDefault(repoRoot string) (Config, bool, error) {
 	if c.MySQLService == "" {
 		c.MySQLService = def.MySQLService
 	}
+	if c.MySQL9Service == "" {
+		c.MySQL9Service = def.MySQL9Service
+	}
+	if c.MariaDB10Service == "" {
+		c.MariaDB10Service = def.MariaDB10Service
+	}
+	if c.MariaDB12Service == "" {
+		c.MariaDB12Service = def.MariaDB12Service
+	}
 	if c.PostgresService == "" {
 		c.PostgresService = def.PostgresService
 	}
@@ -126,6 +147,15 @@ func LoadOrDefault(repoRoot string) (Config, bool, error) {
 	}
 	if c.MySQLPort == 0 {
 		c.MySQLPort = def.MySQLPort
+	}
+	if c.MySQL9Port == 0 {
+		c.MySQL9Port = def.MySQL9Port
+	}
+	if c.MariaDB10Port == 0 {
+		c.MariaDB10Port = def.MariaDB10Port
+	}
+	if c.MariaDB12Port == 0 {
+		c.MariaDB12Port = def.MariaDB12Port
 	}
 	if c.PostgresHost == "" {
 		c.PostgresHost = def.PostgresHost

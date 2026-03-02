@@ -7,11 +7,11 @@
   "nginx_conf_root": "/data/projects/containers/nginx/conf.d",
   "nginx_external_root": "/data/projects/containers/nginx/external",
   "compose_dir": "D:\\Development\\projects",
-  "default_domain_pattern": "\u003cproject\u003e.\u003ccompany\u003e.local",
+  "default_domain_pattern": "<project>.<company>.local",
   "mysql_service": "mysql",
   "postgres_service": "postgres",
   "mysql_host": "127.0.0.1",
-  "mysql_port": 3306,
+  "mysql_port": 3384,
   "mysql_root_pass": "change-me",
   "mysql_cli": "C:\\\\Program Files\\\\MySQL\\\\MySQL Server 8.4\\\\bin\\\\mysql.exe",
   "postgres_host": "127.0.0.1",
@@ -21,5 +21,11 @@
   "docker_cli": "docker",
   "mkcert_cli": "mkcert",
   "store_file": "/data/projects/data/devhelper.store.json",
-  "log_level": "debug"
+  "log_level": "debug",
+  "mysql9_service": "mysql9",
+  "mysql9_port": 3396,
+  "mariadb10_service": "mariadb10",
+  "mariadb10_port": 33106,
+  "mariadb12_service": "mariadb12",
+  "mariadb12_port": 3312
 }

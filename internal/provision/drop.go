@@ -33,7 +33,7 @@ func Drop(a *app.App, st *store.Store, req DropRequest) (DropResult, error) {
 	warns := []string{}
 
 	// Drop DB (best-effort; keep going on failure).
-	if strings.ToLower(strings.TrimSpace(p.DB)) == "mysql" || strings.ToLower(strings.TrimSpace(p.DB)) == "postgres" {
+	if strings.ToLower(strings.TrimSpace(p.DB)) == "mysql" || strings.ToLower(strings.TrimSpace(p.DB)) == "mysql9" || strings.ToLower(strings.TrimSpace(p.DB)) == "mariadb10" || strings.ToLower(strings.TrimSpace(p.DB)) == "mariadb12" || strings.ToLower(strings.TrimSpace(p.DB)) == "postgres" {
 		if err := dropDB(a.Cfg, p.DB, p.DBName, p.DBUser); err != nil {
 			warns = append(warns, "db: "+err.Error())
 		}

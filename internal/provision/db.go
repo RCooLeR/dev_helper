@@ -13,6 +13,44 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+type mysqlTarget struct {
+	service  string
+	host     string
+	port     int
+	rootPass string
+}
+
+type pgTarget struct {
+	service   string
+	host      string
+	port      int
+	superPass string
+}
+
+func resolveMySQLTarget(cfg app.Config, engine string) (mysqlTarget, bool) {
+	engine = strings.ToLower(strings.TrimSpace(engine))
+	switch engine {
+	case "mysql":
+		return mysqlTarget{service: cfg.MySQLService, host: cfg.MySQLHost, port: cfg.MySQLPort, rootPass: cfg.MySQLRootPass}, true
+	case "mysql9":
+		return mysqlTarget{service: cfg.MySQL9Service, host: cfg.MySQLHost, port: cfg.MySQL9Port, rootPass: cfg.MySQLRootPass}, true
+	case "mariadb10":
+		return mysqlTarget{service: cfg.MariaDB10Service, host: cfg.MySQLHost, port: cfg.MariaDB10Port, rootPass: cfg.MySQLRootPass}, true
+	case "mariadb12":
+		return mysqlTarget{service: cfg.MariaDB12Service, host: cfg.MySQLHost, port: cfg.MariaDB12Port, rootPass: cfg.MySQLRootPass}, true
+	default:
+		return mysqlTarget{}, false
+	}
+}
+
+func resolvePGTarget(cfg app.Config, engine string) (pgTarget, bool) {
+	engine = strings.ToLower(strings.TrimSpace(engine))
+	if engine != "postgres" {
+		return pgTarget{}, false
+	}
+	return pgTarget{service: cfg.PostgresService, host: cfg.PostgresHost, port: cfg.PostgresPort, superPass: cfg.PostgresSuperPass}, true
+}
+
 func dockerCompose(cfg app.Config, args ...string) (string, error) {
 	exe := strings.TrimSpace(cfg.DockerCli)
 	if exe == "" {
@@ -63,14 +101,14 @@ func psqlExe(cfg app.Config) string {
 	return "psql"
 }
 
-func mysqlPing(cfg app.Config) error {
+func mysqlPingTarget(cfg app.Config, t mysqlTarget) error {
 	sql := "SELECT 1;"
 	args := []string{
 		"--protocol=tcp",
-		"-h", cfg.MySQLHost,
-		"-P", fmt.Sprintf("%d", cfg.MySQLPort),
+		"-h", t.host,
+		"-P", fmt.Sprintf("%d", t.port),
 		"-uroot",
-		"-p" + cfg.MySQLRootPass,
+		"-p" + t.rootPass,
 		"-e", sql,
 	}
 	cmd := exec.Command(mysqlExe(cfg), args...)
@@ -81,16 +119,16 @@ func mysqlPing(cfg app.Config) error {
 	return nil
 }
 
-func psqlPing(cfg app.Config) error {
+func psqlPingTarget(cfg app.Config, t pgTarget) error {
 	args := []string{
-		"-h", cfg.PostgresHost,
-		"-p", fmt.Sprintf("%d", cfg.PostgresPort),
+		"-h", t.host,
+		"-p", fmt.Sprintf("%d", t.port),
 		"-U", "postgres",
 		"-d", "postgres",
 		"-c", "SELECT 1;",
 	}
 	cmd := exec.Command(psqlExe(cfg), args...)
-	cmd.Env = append(os.Environ(), "PGPASSWORD="+cfg.PostgresSuperPass)
+	cmd.Env = append(os.Environ(), "PGPASSWORD="+t.superPass)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("psql ping failed: %w; %s", err, strings.TrimSpace(string(out)))
@@ -98,39 +136,51 @@ func psqlPing(cfg app.Config) error {
 	return nil
 }
 
-func waitMySQLReady(cfg app.Config) error {
-	if err := waitTCP(cfg.MySQLHost, cfg.MySQLPort, 60*time.Second); err != nil {
+func psqlPing(cfg app.Config) error {
+	t, _ := resolvePGTarget(cfg, "postgres")
+	return psqlPingTarget(cfg, t)
+}
+
+func waitMySQLReady(cfg app.Config, t mysqlTarget) error {
+	if err := waitTCP(t.host, t.port, 60*time.Second); err != nil {
 		return err
 	}
 	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
-		if err := mysqlPing(cfg); err == nil {
+		if err := mysqlPingTarget(cfg, t); err == nil {
 			return nil
 		}
 		time.Sleep(800 * time.Millisecond)
 	}
-	return fmt.Errorf("mysql auth not ready on %s:%d (check MYSQL_ROOT_HOST and password)", cfg.MySQLHost, cfg.MySQLPort)
+	return fmt.Errorf("mysql auth not ready on %s:%d (check root host and password)", t.host, t.port)
 }
 
-func waitPostgresReady(cfg app.Config) error {
-	if err := waitTCP(cfg.PostgresHost, cfg.PostgresPort, 60*time.Second); err != nil {
+func waitPostgresReady(cfg app.Config, t pgTarget) error {
+	if err := waitTCP(t.host, t.port, 60*time.Second); err != nil {
 		return err
 	}
 	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
-		if err := psqlPing(cfg); err == nil {
+		if err := psqlPingTarget(cfg, t); err == nil {
 			return nil
 		}
 		time.Sleep(800 * time.Millisecond)
 	}
-	return fmt.Errorf("postgres auth not ready on %s:%d (check password)", cfg.PostgresHost, cfg.PostgresPort)
+	return fmt.Errorf("postgres auth not ready on %s:%d (check password)", t.host, t.port)
 }
 
-func CreateMySQLDB(cfg app.Config, dbName, user, pass string) error {
-	if err := ensureServiceUp(cfg, cfg.MySQLService); err != nil {
+func CreateMySQLDBForEngine(cfg app.Config, engine, dbName, user, pass string) error {
+	t, ok := resolveMySQLTarget(cfg, engine)
+	if !ok {
+		return fmt.Errorf("unknown engine: %s", engine)
+	}
+	if strings.TrimSpace(t.service) == "" {
+		return fmt.Errorf("service name missing for engine %s", engine)
+	}
+	if err := ensureServiceUp(cfg, t.service); err != nil {
 		return err
 	}
-	if err := waitMySQLReady(cfg); err != nil {
+	if err := waitMySQLReady(cfg, t); err != nil {
 		return err
 	}
 	sql := strings.Join([]string{
@@ -139,13 +189,13 @@ func CreateMySQLDB(cfg app.Config, dbName, user, pass string) error {
 		fmt.Sprintf("GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'%%';", dbName, user),
 		"FLUSH PRIVILEGES;",
 	}, " ")
-	log.Info().Msgf("Creating MySQL database '%s' and user '%s'", dbName, user)
+	log.Info().Msgf("Creating MySQL/MariaDB database '%s' and user '%s' (engine=%s)", dbName, user, engine)
 	args := []string{
 		"--protocol=tcp",
-		"-h", cfg.MySQLHost,
-		"-P", fmt.Sprintf("%d", cfg.MySQLPort),
+		"-h", t.host,
+		"-P", fmt.Sprintf("%d", t.port),
 		"-uroot",
-		"-p" + cfg.MySQLRootPass,
+		"-p" + t.rootPass,
 		"-e", sql,
 	}
 	cmd := exec.Command(mysqlExe(cfg), args...)
@@ -154,15 +204,20 @@ func CreateMySQLDB(cfg app.Config, dbName, user, pass string) error {
 		log.Error().Err(err).Msgf("MySQL create failed: %s", strings.TrimSpace(string(out)))
 		return fmt.Errorf("mysql create failed: %w; %s", err, strings.TrimSpace(string(out)))
 	}
-	log.Info().Msgf("MySQL database '%s' and user '%s' created or already exist", dbName, user)
+	log.Info().Msgf("DB ready (engine=%s) db=%s user=%s", engine, dbName, user)
 	return nil
 }
 
+func CreateMySQLDB(cfg app.Config, dbName, user, pass string) error {
+	return CreateMySQLDBForEngine(cfg, "mysql", dbName, user, pass)
+}
+
 func CreatePostgresDB(cfg app.Config, dbName, user, pass string) error {
-	if err := ensureServiceUp(cfg, cfg.PostgresService); err != nil {
+	t, _ := resolvePGTarget(cfg, "postgres")
+	if err := ensureServiceUp(cfg, t.service); err != nil {
 		return err
 	}
-	if err := waitPostgresReady(cfg); err != nil {
+	if err := waitPostgresReady(cfg, t); err != nil {
 		return err
 	}
 	log.Info().Msgf("Creating Postgres database '%s' and user '%s'", dbName, user)
@@ -172,14 +227,14 @@ func CreatePostgresDB(cfg app.Config, dbName, user, pass string) error {
 		user, user, pass,
 	)
 	cmdRole := exec.Command(psqlExe(cfg),
-		"-h", cfg.PostgresHost,
-		"-p", fmt.Sprintf("%d", cfg.PostgresPort),
+		"-h", t.host,
+		"-p", fmt.Sprintf("%d", t.port),
 		"-U", "postgres",
 		"-d", "postgres",
 		"-v", "ON_ERROR_STOP=1",
 		"-c", sqlRole,
 	)
-	cmdRole.Env = append(os.Environ(), "PGPASSWORD="+cfg.PostgresSuperPass)
+	cmdRole.Env = append(os.Environ(), "PGPASSWORD="+t.superPass)
 	out, err := cmdRole.CombinedOutput()
 	if err != nil {
 		log.Error().Err(err).Msgf("Postgres create role failed: %s", strings.TrimSpace(string(out)))
@@ -189,13 +244,13 @@ func CreatePostgresDB(cfg app.Config, dbName, user, pass string) error {
 	// CREATE DATABASE cannot run inside a function/transaction, so we do existence check in Go
 	// and then run plain CREATE DATABASE as a separate statement.
 	cmdCheck := exec.Command(psqlExe(cfg),
-		"-h", cfg.PostgresHost,
-		"-p", fmt.Sprintf("%d", cfg.PostgresPort),
+		"-h", t.host,
+		"-p", fmt.Sprintf("%d", t.port),
 		"-U", "postgres",
 		"-d", "postgres",
 		"-tAc", fmt.Sprintf("SELECT 1 FROM pg_database WHERE datname='%s'", dbName),
 	)
-	cmdCheck.Env = append(os.Environ(), "PGPASSWORD="+cfg.PostgresSuperPass)
+	cmdCheck.Env = append(os.Environ(), "PGPASSWORD="+t.superPass)
 	chkOut, err := cmdCheck.CombinedOutput()
 	if err != nil {
 		log.Error().Err(err).Msgf("Postgres db exists check failed: %s", strings.TrimSpace(string(chkOut)))
@@ -206,14 +261,14 @@ func CreatePostgresDB(cfg app.Config, dbName, user, pass string) error {
 	}
 
 	cmdDB := exec.Command(psqlExe(cfg),
-		"-h", cfg.PostgresHost,
-		"-p", fmt.Sprintf("%d", cfg.PostgresPort),
+		"-h", t.host,
+		"-p", fmt.Sprintf("%d", t.port),
 		"-U", "postgres",
 		"-d", "postgres",
 		"-v", "ON_ERROR_STOP=1",
 		"-c", fmt.Sprintf("CREATE DATABASE %s OWNER %s", dbName, user),
 	)
-	cmdDB.Env = append(os.Environ(), "PGPASSWORD="+cfg.PostgresSuperPass)
+	cmdDB.Env = append(os.Environ(), "PGPASSWORD="+t.superPass)
 	out, err = cmdDB.CombinedOutput()
 	if err != nil {
 		log.Error().Err(err).Msgf("Postgres create db failed: %s", strings.TrimSpace(string(out)))
@@ -226,8 +281,8 @@ func CreatePostgresDB(cfg app.Config, dbName, user, pass string) error {
 func createDB(cfg app.Config, engine, dbName, user, pass string) error {
 	engine = strings.ToLower(strings.TrimSpace(engine))
 	switch engine {
-	case "mysql":
-		return CreateMySQLDB(cfg, dbName, user, pass)
+	case "mysql", "mysql9", "mariadb10", "mariadb12":
+		return CreateMySQLDBForEngine(cfg, engine, dbName, user, pass)
 	case "postgres":
 		return CreatePostgresDB(cfg, dbName, user, pass)
 	default:
@@ -235,11 +290,18 @@ func createDB(cfg app.Config, engine, dbName, user, pass string) error {
 	}
 }
 
-func DropMySQLDB(cfg app.Config, dbName, user string) error {
-	if err := ensureServiceUp(cfg, cfg.MySQLService); err != nil {
+func DropMySQLDBForEngine(cfg app.Config, engine, dbName, user string) error {
+	t, ok := resolveMySQLTarget(cfg, engine)
+	if !ok {
+		return fmt.Errorf("unknown engine: %s", engine)
+	}
+	if strings.TrimSpace(t.service) == "" {
+		return fmt.Errorf("service name missing for engine %s", engine)
+	}
+	if err := ensureServiceUp(cfg, t.service); err != nil {
 		return err
 	}
-	if err := waitMySQLReady(cfg); err != nil {
+	if err := waitMySQLReady(cfg, t); err != nil {
 		return err
 	}
 	sql := strings.Join([]string{
@@ -247,13 +309,12 @@ func DropMySQLDB(cfg app.Config, dbName, user string) error {
 		fmt.Sprintf("DROP USER IF EXISTS '%s'@'%%';", user),
 		"FLUSH PRIVILEGES;",
 	}, " ")
-
 	args := []string{
 		"--protocol=tcp",
-		"-h", cfg.MySQLHost,
-		"-P", fmt.Sprintf("%d", cfg.MySQLPort),
+		"-h", t.host,
+		"-P", fmt.Sprintf("%d", t.port),
 		"-uroot",
-		"-p" + cfg.MySQLRootPass,
+		"-p" + t.rootPass,
 		"-e", sql,
 	}
 	cmd := exec.Command(mysqlExe(cfg), args...)
@@ -264,17 +325,22 @@ func DropMySQLDB(cfg app.Config, dbName, user string) error {
 	return nil
 }
 
+func DropMySQLDB(cfg app.Config, dbName, user string) error {
+	return DropMySQLDBForEngine(cfg, "mysql", dbName, user)
+}
+
 func DropPostgresDB(cfg app.Config, dbName, user string) error {
-	if err := ensureServiceUp(cfg, cfg.PostgresService); err != nil {
+	t, _ := resolvePGTarget(cfg, "postgres")
+	if err := ensureServiceUp(cfg, t.service); err != nil {
 		return err
 	}
-	if err := waitPostgresReady(cfg); err != nil {
+	if err := waitPostgresReady(cfg, t); err != nil {
 		return err
 	}
 
 	baseArgs := []string{
-		"-h", cfg.PostgresHost,
-		"-p", fmt.Sprintf("%d", cfg.PostgresPort),
+		"-h", t.host,
+		"-p", fmt.Sprintf("%d", t.port),
 		"-U", "postgres",
 		"-d", "postgres",
 		"-v", "ON_ERROR_STOP=1",
@@ -284,14 +350,14 @@ func DropPostgresDB(cfg app.Config, dbName, user string) error {
 	cmdTerm := exec.Command(psqlExe(cfg), append(baseArgs,
 		"-c", fmt.Sprintf("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='%s' AND pid <> pg_backend_pid();", dbName),
 	)...)
-	cmdTerm.Env = append(os.Environ(), "PGPASSWORD="+cfg.PostgresSuperPass)
+	cmdTerm.Env = append(os.Environ(), "PGPASSWORD="+t.superPass)
 	_, _ = cmdTerm.CombinedOutput() // best-effort
 
 	// Drop database (cannot run inside a function/transaction).
 	cmdDB := exec.Command(psqlExe(cfg), append(baseArgs,
 		"-c", fmt.Sprintf("DROP DATABASE IF EXISTS %s;", dbName),
 	)...)
-	cmdDB.Env = append(os.Environ(), "PGPASSWORD="+cfg.PostgresSuperPass)
+	cmdDB.Env = append(os.Environ(), "PGPASSWORD="+t.superPass)
 	out, err := cmdDB.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("postgres drop db failed: %w; %s", err, strings.TrimSpace(string(out)))
@@ -302,7 +368,7 @@ func DropPostgresDB(cfg app.Config, dbName, user string) error {
 	cmdRole := exec.Command(psqlExe(cfg), append(baseArgs,
 		"-c", sqlRole,
 	)...)
-	cmdRole.Env = append(os.Environ(), "PGPASSWORD="+cfg.PostgresSuperPass)
+	cmdRole.Env = append(os.Environ(), "PGPASSWORD="+t.superPass)
 	out, err = cmdRole.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("postgres drop role failed: %w; %s", err, strings.TrimSpace(string(out)))
@@ -313,8 +379,8 @@ func DropPostgresDB(cfg app.Config, dbName, user string) error {
 func dropDB(cfg app.Config, engine, dbName, user string) error {
 	engine = strings.ToLower(strings.TrimSpace(engine))
 	switch engine {
-	case "mysql":
-		return DropMySQLDB(cfg, dbName, user)
+	case "mysql", "mysql9", "mariadb10", "mariadb12":
+		return DropMySQLDBForEngine(cfg, engine, dbName, user)
 	case "postgres":
 		return DropPostgresDB(cfg, dbName, user)
 	default:
@@ -349,19 +415,23 @@ func ImportSQL(cfg app.Config, engine, dbName, dumpFile string) error {
 	defer f.Close()
 
 	switch engine {
-	case "mysql":
-		if err := ensureServiceUp(cfg, cfg.MySQLService); err != nil {
+	case "mysql", "mysql9", "mariadb10", "mariadb12":
+		t, ok := resolveMySQLTarget(cfg, engine)
+		if !ok {
+			return fmt.Errorf("unknown engine: %s", engine)
+		}
+		if err := ensureServiceUp(cfg, t.service); err != nil {
 			return err
 		}
-		if err := waitMySQLReady(cfg); err != nil {
+		if err := waitMySQLReady(cfg, t); err != nil {
 			return err
 		}
 		cmd := exec.Command(mysqlExe(cfg),
 			"--protocol=tcp",
-			"-h", cfg.MySQLHost,
-			"-P", fmt.Sprintf("%d", cfg.MySQLPort),
+			"-h", t.host,
+			"-P", fmt.Sprintf("%d", t.port),
 			"-uroot",
-			"-p"+cfg.MySQLRootPass,
+			"-p"+t.rootPass,
 			dbName,
 		)
 		cmd.Stdin = f
@@ -372,15 +442,16 @@ func ImportSQL(cfg app.Config, engine, dbName, dumpFile string) error {
 		return nil
 
 	case "postgres":
-		if err := ensureServiceUp(cfg, cfg.PostgresService); err != nil {
+		t, _ := resolvePGTarget(cfg, "postgres")
+		if err := ensureServiceUp(cfg, t.service); err != nil {
 			return err
 		}
-		if err := waitPostgresReady(cfg); err != nil {
+		if err := waitPostgresReady(cfg, t); err != nil {
 			return err
 		}
 		cmd := exec.Command(psqlExe(cfg),
-			"-h", cfg.PostgresHost,
-			"-p", fmt.Sprintf("%d", cfg.PostgresPort),
+			"-h", t.host,
+			"-p", fmt.Sprintf("%d", t.port),
 			"-U", "postgres",
 			"-d", dbName,
 			"-v", "ON_ERROR_STOP=1",
