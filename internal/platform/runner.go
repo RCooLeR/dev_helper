@@ -16,7 +16,7 @@ func NewRunner(cfg app.Config) *Runner { return &Runner{cfg: cfg} }
 
 // Shell executes a command via the host shell.
 //
-// NOTE: We avoid using this for DB operations (we run mysql/psql directly with argv),
+// NOTE: We avoid using this for DB operations (we run mysql-8.4/psql directly with argv),
 // because quoting gets painful on Windows.
 func (r *Runner) Shell(command string) (string, error) {
 	var cmd *exec.Cmd

@@ -20,7 +20,7 @@ func cmdInit(a *app.App) *cli.Command {
 			&cli.StringFlag{Name: "wsl-root", Value: a.Cfg.RootDir},
 			&cli.StringFlag{Name: "host-mirror", Value: a.Cfg.HostMirrorDir},
 			&cli.StringFlag{Name: "compose-dir", Value: a.Cfg.ComposeDir},
-			&cli.StringFlag{Name: "mysql-cli", Value: a.Cfg.MySQLCli},
+			&cli.StringFlag{Name: "mysql-8.4-cli", Value: a.Cfg.MySQLCli},
 			&cli.StringFlag{Name: "psql-cli", Value: a.Cfg.PSQLCli},
 			&cli.StringFlag{Name: "mkcert-cli", Value: a.Cfg.MkcertCli},
 			&cli.StringFlag{Name: "docker-cli", Value: a.Cfg.DockerCli},
@@ -36,7 +36,7 @@ func cmdInit(a *app.App) *cli.Command {
 			if runtime.GOOS == "windows" && !cctx.IsSet("compose-dir") {
 				cfg.ComposeDir = filepath.Join(a.RepoRoot, "projects")
 			}
-			cfg.MySQLCli = cctx.String("mysql-cli")
+			cfg.MySQLCli = cctx.String("mysql-8.4-cli")
 			cfg.PSQLCli = cctx.String("psql-cli")
 			cfg.MkcertCli = cctx.String("mkcert-cli")
 			cfg.DockerCli = cctx.String("docker-cli")

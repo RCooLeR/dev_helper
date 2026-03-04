@@ -30,9 +30,9 @@ type pgTarget struct {
 func resolveMySQLTarget(cfg app.Config, engine string) (mysqlTarget, bool) {
 	engine = strings.ToLower(strings.TrimSpace(engine))
 	switch engine {
-	case "mysql":
+	case "mysql-8.4":
 		return mysqlTarget{service: cfg.MySQLService, host: cfg.MySQLHost, port: cfg.MySQLPort, rootPass: cfg.MySQLRootPass}, true
-	case "mysql9":
+	case "mysql-9.6":
 		return mysqlTarget{service: cfg.MySQL9Service, host: cfg.MySQLHost, port: cfg.MySQL9Port, rootPass: cfg.MySQLRootPass}, true
 	case "mariadb10":
 		return mysqlTarget{service: cfg.MariaDB10Service, host: cfg.MySQLHost, port: cfg.MariaDB10Port, rootPass: cfg.MySQLRootPass}, true
@@ -91,7 +91,7 @@ func mysqlExe(cfg app.Config) string {
 	if strings.TrimSpace(cfg.MySQLCli) != "" {
 		return cfg.MySQLCli
 	}
-	return "mysql"
+	return "mysql-8.4"
 }
 
 func psqlExe(cfg app.Config) string {
@@ -114,7 +114,7 @@ func mysqlPingTarget(cfg app.Config, t mysqlTarget) error {
 	cmd := exec.Command(mysqlExe(cfg), args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("mysql ping failed: %w; %s", err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("mysql-8.4 ping failed: %w; %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
@@ -152,7 +152,7 @@ func waitMySQLReady(cfg app.Config, t mysqlTarget) error {
 		}
 		time.Sleep(800 * time.Millisecond)
 	}
-	return fmt.Errorf("mysql auth not ready on %s:%d (check root host and password)", t.host, t.port)
+	return fmt.Errorf("mysql-8.4 auth not ready on %s:%d (check root host and password)", t.host, t.port)
 }
 
 func waitPostgresReady(cfg app.Config, t pgTarget) error {
@@ -202,14 +202,14 @@ func CreateMySQLDBForEngine(cfg app.Config, engine, dbName, user, pass string) e
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Error().Err(err).Msgf("MySQL create failed: %s", strings.TrimSpace(string(out)))
-		return fmt.Errorf("mysql create failed: %w; %s", err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("mysql-8.4 create failed: %w; %s", err, strings.TrimSpace(string(out)))
 	}
 	log.Info().Msgf("DB ready (engine=%s) db=%s user=%s", engine, dbName, user)
 	return nil
 }
 
 func CreateMySQLDB(cfg app.Config, dbName, user, pass string) error {
-	return CreateMySQLDBForEngine(cfg, "mysql", dbName, user, pass)
+	return CreateMySQLDBForEngine(cfg, "mysql-8.4", dbName, user, pass)
 }
 
 func CreatePostgresDB(cfg app.Config, dbName, user, pass string) error {
@@ -281,7 +281,7 @@ func CreatePostgresDB(cfg app.Config, dbName, user, pass string) error {
 func createDB(cfg app.Config, engine, dbName, user, pass string) error {
 	engine = strings.ToLower(strings.TrimSpace(engine))
 	switch engine {
-	case "mysql", "mysql9", "mariadb10", "mariadb12":
+	case "mysql-8.4", "mysql-9.6", "mariadb10", "mariadb12":
 		return CreateMySQLDBForEngine(cfg, engine, dbName, user, pass)
 	case "postgres":
 		return CreatePostgresDB(cfg, dbName, user, pass)
@@ -320,13 +320,13 @@ func DropMySQLDBForEngine(cfg app.Config, engine, dbName, user string) error {
 	cmd := exec.Command(mysqlExe(cfg), args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("mysql drop failed: %w; %s", err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("mysql-8.4 drop failed: %w; %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
 
 func DropMySQLDB(cfg app.Config, dbName, user string) error {
-	return DropMySQLDBForEngine(cfg, "mysql", dbName, user)
+	return DropMySQLDBForEngine(cfg, "mysql-8.4", dbName, user)
 }
 
 func DropPostgresDB(cfg app.Config, dbName, user string) error {
@@ -379,7 +379,7 @@ func DropPostgresDB(cfg app.Config, dbName, user string) error {
 func dropDB(cfg app.Config, engine, dbName, user string) error {
 	engine = strings.ToLower(strings.TrimSpace(engine))
 	switch engine {
-	case "mysql", "mysql9", "mariadb10", "mariadb12":
+	case "mysql-8.4", "mysql-9.6", "mariadb10", "mariadb12":
 		return DropMySQLDBForEngine(cfg, engine, dbName, user)
 	case "postgres":
 		return DropPostgresDB(cfg, dbName, user)
@@ -415,7 +415,7 @@ func ImportSQL(cfg app.Config, engine, dbName, dumpFile string) error {
 	defer f.Close()
 
 	switch engine {
-	case "mysql", "mysql9", "mariadb10", "mariadb12":
+	case "mysql-8.4", "mysql-9.6", "mariadb10", "mariadb12":
 		t, ok := resolveMySQLTarget(cfg, engine)
 		if !ok {
 			return fmt.Errorf("unknown engine: %s", engine)
@@ -437,7 +437,7 @@ func ImportSQL(cfg app.Config, engine, dbName, dumpFile string) error {
 		cmd.Stdin = f
 		out, err := cmd.CombinedOutput()
 		if err != nil {
-			return fmt.Errorf("mysql import failed: %w; %s", err, strings.TrimSpace(string(out)))
+			return fmt.Errorf("mysql-8.4 import failed: %w; %s", err, strings.TrimSpace(string(out)))
 		}
 		return nil
 

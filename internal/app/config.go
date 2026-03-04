@@ -39,7 +39,7 @@ type Config struct {
 	MariaDB10Port int    `json:"mariadb10_port"`
 	MariaDB12Port int    `json:"mariadb12_port"`
 	MySQLRootPass string `json:"mysql_root_pass"`
-	MySQLCli      string `json:"mysql_cli"` // full path to mysql.exe (recommended) or empty to use PATH
+	MySQLCli      string `json:"mysql_cli"` // full path to mysql-8.4.exe (recommended) or empty to use PATH
 
 	PostgresHost      string `json:"postgres_host"`
 	PostgresPort      int    `json:"postgres_port"`
@@ -57,8 +57,8 @@ type Config struct {
 func DefaultConfig(repoRoot string) Config {
 	c := Config{
 		DefaultDomainPattern: "<project>.<company>.local",
-		MySQLService:         "mysql",
-		MySQL9Service:        "mysql9",
+		MySQLService:         "mysql-8.4",
+		MySQL9Service:        "mysql-9.6",
 		MariaDB10Service:     "mariadb10",
 		MariaDB12Service:     "mariadb12",
 		PostgresService:      "postgres",
