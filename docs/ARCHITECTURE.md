@@ -1,7 +1,7 @@
 # Architecture (MVP)
 
 - macOS/Linux runtime root: `./projects`
-- Windows default runtime root (WSL): `/data/dev-helper/projects`
+- Windows default runtime root (WSL): `/data/projects`
   - mirror path example: `\\wsl$\Ubuntu\data\dev-helper\projects`
 
 The tool writes:

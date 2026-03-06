@@ -12,13 +12,13 @@ Example:
 
 ```json
 {
-  "root_dir": "/data/dev-helper/projects",
+  "root_dir": "/data/projects",
   "host_mirror_dir": "\\\\wsl$\\\\Ubuntu\\\\data\\\\dev-helper\\\\projects",
   "wsl_distro": "Ubuntu",
-  "apps_root": "/data/dev-helper/projects/apps",
-  "data_root": "/data/dev-helper/projects/data",
-  "nginx_conf_root": "/data/dev-helper/projects/containers/nginx/conf.d",
-  "nginx_external_root": "/data/dev-helper/projects/containers/nginx/external",
+  "apps_root": "/data/projects/apps",
+  "data_root": "/data/projects/data",
+  "nginx_conf_root": "/data/projects/containers/nginx/conf.d",
+  "nginx_external_root": "/data/projects/containers/nginx/external",
   "compose_dir": "E:\\\\Development\\\\projects",
   "default_domain_pattern": "<project>.<company>.local",
   "mysql_service": "mysql-8.4",
@@ -33,7 +33,7 @@ Example:
   "psql_cli": "C:\\\\Program Files\\\\PostgreSQL\\\\18\\\\bin\\\\psql.exe",
   "docker_cli": "docker",
   "mkcert_cli": "mkcert",
-  "store_file": "/data/dev-helper/projects/data/devhelper.store.json",
+  "store_file": "/data/projects/data/devhelper.store.json",
   "log_level": "debug"
 }
 ```

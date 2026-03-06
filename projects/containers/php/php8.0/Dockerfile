@@ -100,8 +100,6 @@ RUN curl -sS https://getcomposer.org/installer | php -- \
         --filename=composer \
         --install-dir=/usr/local/bin && \
         echo "alias composer='composer'" >> /root/.bashrc
-		
-CMD ["composer", "self-update", "--allow-root"]
 
 
 VOLUME /tmp
@@ -117,5 +115,4 @@ RUN if getent group www-data >/dev/null; then \
     fi \
  && usermod -u ${PUID} -g ${PGID} www-data
 
-CMD ["composer", "self-update", "--allow-root"]
-CMD ["php-fpm"]
+CMD ["sh", "-c", "composer self-update && php-fpm"]

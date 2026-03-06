@@ -100,5 +100,4 @@ RUN if getent group www-data >/dev/null; then \
     fi \
  && usermod -u ${PUID} -g ${PGID} www-data
 
-CMD ["composer", "self-update", "--allow-root"]
-CMD ["php-fpm"]
+CMD ["sh", "-c", "composer self-update && php-fpm"]
