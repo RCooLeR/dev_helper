@@ -91,7 +91,7 @@ func mysqlExe(cfg app.Config) string {
 	if strings.TrimSpace(cfg.MySQLCli) != "" {
 		return cfg.MySQLCli
 	}
-	return "mysql-8.4"
+	return "mysql"
 }
 
 func psqlExe(cfg app.Config) string {

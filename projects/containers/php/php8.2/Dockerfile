@@ -39,7 +39,7 @@ RUN apt-get update && apt-get install -y git mc\
 	&& docker-php-ext-install soap && docker-php-ext-enable soap
 
 
-RUN ln -s /usr/include/x86_64-linux-gnu/gmp.h /usr/include/gmp.h
+RUN ln -s /usr/include/$(gcc -print-multiarch)/gmp.h /usr/include/gmp.h
 RUN docker-php-ext-install gmp && docker-php-ext-enable gmp
 RUN docker-php-ext-configure zip && docker-php-ext-install zip  && docker-php-ext-enable zip
 
@@ -111,4 +111,5 @@ RUN if getent group www-data >/dev/null; then \
     fi \
  && usermod -u ${PUID} -g ${PGID} www-data
 
+CMD ["composer", "self-update", "--allow-root"]
 CMD ["php-fpm"]

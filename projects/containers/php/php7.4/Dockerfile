@@ -39,7 +39,7 @@ RUN pecl install redis-4.3.0 \
 && docker-php-ext-enable memcached
 
 	RUN apt-get update && apt-get install  -y libgmp-dev
-	RUN ln -s /usr/include/x86_64-linux-gnu/gmp.h /usr/include/gmp.h
+	RUN ln -s /usr/include/$(gcc -print-multiarch)/gmp.h /usr/include/gmp.h
 	RUN docker-php-ext-install gmp
 
 	RUN apt-get install -y libzip-dev \
@@ -76,8 +76,6 @@ RUN curl -sS https://getcomposer.org/installer | php -- \
         --install-dir=/usr/local/bin && \
         echo "alias composer='composer'" >> /root/.bashrc
 
-RUN composer self-update --allow-root
-
 RUN wget -qO- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.5/install.sh | bash
 
 RUN echo 'export NVM_DIR="$HOME/.nvm"'                                       >> "$HOME/.bashrc"
@@ -102,4 +100,5 @@ RUN if getent group www-data >/dev/null; then \
     fi \
  && usermod -u ${PUID} -g ${PGID} www-data
 
+CMD ["composer", "self-update", "--allow-root"]
 CMD ["php-fpm"]

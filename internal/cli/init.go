@@ -47,7 +47,7 @@ func cmdInit(a *app.App) *cli.Command {
 				cfg.DataRoot = cfg.RootDir + "/data"
 				cfg.NginxConfRoot = cfg.RootDir + "/containers/nginx/conf.d"
 				cfg.NginxExternalRoot = cfg.RootDir + "/containers/nginx/external"
-				cfg.StoreFile = cfg.DataRoot + "/devhelper.store.json"
+				cfg.StoreFile = filepath.Join(cfg.ComposeDir, "data", "devhelper.store.json")
 			} else {
 				// On Linux/macOS keep within repo unless user changed it.
 				if cfg.RootDir == "" {

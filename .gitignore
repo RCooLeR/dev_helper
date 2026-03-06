@@ -178,3 +178,6 @@ fabric.properties
 
 projects/apps/
 !projects/apps/.gitkeep
+/projects/ssh/
+!/projects/ssh/.gitkeep
+/projects/data/devhelper.store.json

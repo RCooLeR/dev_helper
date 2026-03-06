@@ -38,7 +38,7 @@ RUN pecl install redis-4.3.0 \
 && docker-php-ext-enable memcached
 
 RUN apt-get update && apt-get install  -y libgmp-dev
-RUN ln -s /usr/include/x86_64-linux-gnu/gmp.h /usr/include/gmp.h
+RUN ln -s /usr/include/$(gcc -print-multiarch)/gmp.h /usr/include/gmp.h
 RUN docker-php-ext-install gmp
 
 RUN apt-get install -y libzip-dev \
@@ -69,8 +69,6 @@ RUN curl -sS https://getcomposer.org/installer | php -- \
         --filename=composer \
         --install-dir=/usr/local/bin && \
         echo "alias composer='composer'" >> /root/.bashrc
-		
-CMD        composer self-update --allow-root
 
 VOLUME /tmp
 
@@ -86,4 +84,5 @@ RUN if getent group www-data >/dev/null; then \
     fi \
  && usermod -u ${PUID} -g ${PGID} www-data
 
+CMD ["composer", "self-update", "--allow-root"]
 CMD ["php-fpm"]

@@ -49,7 +49,7 @@ RUN apt-get update && apt-get install -y git \
 				&& docker-php-ext-enable memcache
 
 	RUN apt-get update && apt-get install  -y libgmp-dev
-	RUN ln -s /usr/include/x86_64-linux-gnu/gmp.h /usr/include/gmp.h
+	RUN ln -s /usr/include/$(gcc -print-multiarch)/gmp.h /usr/include/gmp.h
 	RUN docker-php-ext-install gmp
 	RUN docker-php-ext-configure zip && docker-php-ext-install zip  && docker-php-ext-enable zip
 
@@ -83,8 +83,7 @@ RUN curl -sS https://getcomposer.org/installer | php -- \
         --filename=composer \
         --install-dir=/usr/local/bin && \
         echo "alias composer='composer'" >> /root/.bashrc
-		
-CMD        composer self-update --allow-root
+
 
 # Fix fucking permissions
 ARG PUID=1000
@@ -98,4 +97,5 @@ RUN if getent group www-data >/dev/null; then \
     fi \
  && usermod -u ${PUID} -g ${PGID} www-data
 
+CMD ["composer", "self-update", "--allow-root"]
 CMD ["php-fpm"]

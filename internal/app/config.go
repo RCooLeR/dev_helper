@@ -88,14 +88,14 @@ func DefaultConfig(repoRoot string) Config {
 	if runtime.GOOS == "windows" {
 		// Runtime lives in WSL filesystem for performance.
 		c.WSLDistro = "Ubuntu"
-		c.RootDir = "/data/projects"
-		c.HostMirrorDir = `\\wsl$\\Ubuntu\\data\\projects`
+		c.RootDir = "/data/dev-helper/projects"
+		c.HostMirrorDir = `\\wsl$\\Ubuntu\\data\\dev-helper\\projects`
 
 		c.AppsRoot = c.RootDir + "/apps"
 		c.DataRoot = c.RootDir + "/data"
 		c.NginxConfRoot = c.RootDir + "/containers/nginx/conf.d"
 		c.NginxExternalRoot = c.RootDir + "/containers/nginx/external"
-		c.StoreFile = c.DataRoot + "/devhelper.store.json"
+		c.StoreFile = filepath.Join(repoRoot, "projects", "data", "devhelper.store.json")
 
 		// Compose file lives on Windows side in the repo.
 		c.ComposeDir = filepath.Join(repoRoot, "projects")

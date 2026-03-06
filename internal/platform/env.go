@@ -4,16 +4,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"devhelper/internal/app"
 )
 
 func forCompose(cfg app.Config, p string) string {
-	if runtime.GOOS == "windows" {
-		return WSLToHost(cfg, p)
-	}
+	// On Windows we run `docker compose` inside WSL, so env values must be WSL paths.
+	// On Linux/macOS these are regular host paths.
 	return p
 }
 
