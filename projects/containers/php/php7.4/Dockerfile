@@ -76,7 +76,7 @@ RUN curl -sS https://getcomposer.org/installer | php -- \
         --install-dir=/usr/local/bin && \
         echo "alias composer='composer'" >> /root/.bashrc
 
-CMD        composer self-update --allow-root
+RUN composer self-update --allow-root
 
 RUN wget -qO- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.5/install.sh | bash
 
