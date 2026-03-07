@@ -15,4 +15,4 @@ COPY ./ssl/dh4096.pem /etc/nginx/external/dhparam.pem
 
 RUN set -eux; \
     chmod 644 /etc/nginx/external/cert.pem /etc/nginx/external/dh.pem /etc/nginx/external/dhparam.pem; \
-    chmod 600 /etc/nginx/external/key.pem
+    chmod 644 /etc/nginx/external/key.pem

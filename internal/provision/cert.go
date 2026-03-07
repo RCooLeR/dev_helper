@@ -55,6 +55,15 @@ func CertIssue(cfg app.Config, domain string) error {
 		return fmt.Errorf("mkcert issue failed: %w", err)
 	}
 	log.Info().Msgf("Created cert.pem and key.pem for domain %s", domain)
+	//set 644 permissions for cert and key files
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(certFile, 0o644); err != nil {
+			return fmt.Errorf("failed to set permissions for cert.pem: %w", err)
+		}
+		if err := os.Chmod(keyFile, 0o644); err != nil {
+			return fmt.Errorf("failed to set permissions for key.pem: %w", err)
+		}
+	}
 	return nil
 }
 
