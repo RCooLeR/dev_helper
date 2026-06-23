@@ -25,7 +25,11 @@ type Config struct {
 
 	DefaultDomainPattern string `json:"default_domain_pattern"`
 
-	// Docker compose service names (used to bring DB containers up)
+	// Docker compose service names (used to bring DB containers up).
+	//
+	// MySQL9Service is deliberately named after the "mysql9" compose service
+	// instead of a concrete version. The image tag can move from 9.6 to 9.7
+	// without changing the store schema or every CLI/API caller.
 	MySQLService     string `json:"mysql_service"`
 	MySQL9Service    string `json:"mysql9_service"`
 	MariaDB10Service string `json:"mariadb10_service"`
@@ -58,7 +62,7 @@ func DefaultConfig(repoRoot string) Config {
 	c := Config{
 		DefaultDomainPattern: "<project>.<company>.local",
 		MySQLService:         "mysql-8.4",
-		MySQL9Service:        "mysql-9.6",
+		MySQL9Service:        "mysql-9.7",
 		MariaDB10Service:     "mariadb10",
 		MariaDB12Service:     "mariadb12",
 		PostgresService:      "postgres",
@@ -89,7 +93,7 @@ func DefaultConfig(repoRoot string) Config {
 		// Runtime lives in WSL filesystem for performance.
 		c.WSLDistro = "Ubuntu"
 		c.RootDir = "/data/projects"
-		c.HostMirrorDir = `\\wsl$\\Ubuntu\\data\\projects`
+		c.HostMirrorDir = `\\wsl$\Ubuntu\data\projects`
 
 		c.AppsRoot = c.RootDir + "/apps"
 		c.DataRoot = c.RootDir + "/data"
@@ -130,7 +134,7 @@ func LoadOrDefault(repoRoot string) (Config, bool, error) {
 	if c.MySQLService == "" {
 		c.MySQLService = def.MySQLService
 	}
-	if c.MySQL9Service == "" {
+	if c.MySQL9Service == "" || c.MySQL9Service == "mysql-9.6" {
 		c.MySQL9Service = def.MySQL9Service
 	}
 	if c.MariaDB10Service == "" {

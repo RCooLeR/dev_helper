@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 
 	"devhelper/internal/app"
 	"devhelper/internal/platform"
@@ -32,8 +31,10 @@ func Drop(a *app.App, st *store.Store, req DropRequest) (DropResult, error) {
 
 	warns := []string{}
 
-	// Drop DB (best-effort; keep going on failure).
-	if strings.ToLower(strings.TrimSpace(p.DB)) == "mysql-8.4" || strings.ToLower(strings.TrimSpace(p.DB)) == "mysql-9.6" || strings.ToLower(strings.TrimSpace(p.DB)) == "mariadb10" || strings.ToLower(strings.TrimSpace(p.DB)) == "mariadb12" || strings.ToLower(strings.TrimSpace(p.DB)) == "postgres" {
+	// Drop DB best-effort and keep deleting files even when the DB tool is not
+	// available. That is deliberate: a broken database container should not
+	// strand nginx configs, cert directories, or store records forever.
+	if isSupportedDB(p.DB) {
 		if err := dropDB(a.Cfg, p.DB, p.DBName, p.DBUser); err != nil {
 			warns = append(warns, "db: "+err.Error())
 		}

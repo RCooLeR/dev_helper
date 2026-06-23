@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -39,6 +40,11 @@ type CreateResult struct {
 var safeName = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 var safeDB = regexp.MustCompile(`[^a-z0-9_]+`)
 
+// sanitize turns user-facing company/project text into a filesystem and nginx
+// friendly slug. It is intentionally stricter than "whatever the OS accepts":
+// the same value is later reused in paths, nginx config names, log file names,
+// and default domains, so one predictable alphabet keeps every downstream
+// consumer simple.
 func sanitize(s string) string {
 	s = strings.TrimSpace(strings.ToLower(s))
 	s = safeName.ReplaceAllString(s, "-")
@@ -60,6 +66,9 @@ func dbIdent(s string) string {
 	return s
 }
 
+// defaultDomain expands the user-configurable pattern. The config normally
+// looks like "<project>.<company>.local"; keeping this as replacement text
+// instead of fmt.Sprintf lets users reorder or omit either token.
 func defaultDomain(pattern, company, project string) string {
 	d := strings.ReplaceAll(pattern, "<company>", company)
 	d = strings.ReplaceAll(d, "<project>", project)
@@ -72,11 +81,19 @@ func phpServiceName(php string) string {
 	return "php" + php
 }
 
+// randomPass creates credentials for per-project DB users. It uses only
+// shell/URL-friendly characters because these values are commonly copied into
+// .env files and command lines during local development.
 func randomPass(n int) string {
 	const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
 	b := make([]byte, n)
 	rb := make([]byte, n)
-	_, _ = rand.Read(rb)
+	if _, err := io.ReadFull(rand.Reader, rb); err != nil {
+		// crypto/rand should only fail when the OS CSPRNG is unavailable. We
+		// panic instead of silently creating weak credentials because a project
+		// DB password is security-sensitive and no caller can repair a bad one.
+		panic(fmt.Errorf("generate random password: %w", err))
+	}
 	for i := range b {
 		b[i] = chars[int(rb[i])%len(chars)]
 	}
@@ -102,12 +119,16 @@ func Create(a *app.App, st *store.Store, req CreateRequest) (CreateResult, error
 		hostAppDir = platform.WSLToHost(cfg, runtimeAppDir)
 	}
 
-	// Create project dir in the fast runtime FS (WSL on Windows via \\wsl$ mirror).
+	// Create the runtime project directory. On Windows this path points into
+	// WSL through the \\wsl$ UNC mirror, because Docker Desktop performs much
+	// better with Linux files than with bind mounts from NTFS.
 	if err := os.MkdirAll(hostAppDir, 0o755); err != nil {
 		return CreateResult{}, err
 	}
 
-	// Also create a host-side mirror dir inside the repo (convenient for editors / git, if needed).
+	// Also create a tiny Windows-side mirror under projects/apps. It is not the
+	// real app checkout; it is just a breadcrumb for editors/tools that start
+	// from the repo and need to find the WSL path quickly.
 	if runtime.GOOS == "windows" {
 		winDir := filepath.Join(a.RepoRoot, "projects", "apps", company, project)
 		_ = os.MkdirAll(winDir, 0o755)
@@ -153,6 +174,9 @@ func Create(a *app.App, st *store.Store, req CreateRequest) (CreateResult, error
 	}
 
 	warnings := []string{}
+	// Hosts/certs/DB setup are useful, but they are not prerequisites for
+	// writing the store entry. We collect warnings so the UI can tell the user
+	// exactly what needs manual attention while still preserving the project.
 	if err := platform.AddHost(domain); err != nil {
 		warnings = append(warnings, "hosts: "+err.Error())
 	}
@@ -173,8 +197,8 @@ func Create(a *app.App, st *store.Store, req CreateRequest) (CreateResult, error
 	}
 	log.Info().Msgf("Created cert.pem and key.pem for domain %s", domain)
 	dbName, dbUser, dbPass := "", "", ""
-	db := strings.ToLower(strings.TrimSpace(req.DB))
-	if db == "mysql-8.4" || db == "mysql-9.6" || db == "mariadb10" || db == "mariadb12" || db == "postgres" {
+	db := normalizeDBEngine(req.DB)
+	if isSupportedDB(db) {
 		dbName = dbIdent(company + "_" + project)
 		dbUser = dbIdent(project + "_u")
 		dbPass = randomPass(16)

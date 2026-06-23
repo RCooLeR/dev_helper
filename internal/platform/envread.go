@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"devhelper/internal/app"
@@ -31,25 +30,20 @@ func GetComposeEnv(cfg app.Config, key, fallback string) string {
 
 // ReadComposeEnv reads <composeDir>/.env into a map.
 func ReadComposeEnv(cfg app.Config) (map[string]string, error) {
-	envPath := filepath.ToSlash(filepath.Join(cfg.ComposeDir, ".env"))
-	var content string
-	if runtime.GOOS == "windows" {
-		r := NewRunner(cfg)
-		out, err := r.Shellf("test -f %q && cat %q || true", envPath, envPath)
-		if err != nil {
-			// If WSL path is not ready yet, just surface empty map.
-			log.Err(err).Msg("failed to read env")
+	// ComposeDir is always the host directory that contains docker-compose.yml.
+	// On Windows that means a normal path such as D:\Development\projects, not
+	// a WSL path. Reading the file directly avoids shell/quoting differences
+	// and fixes older behavior that tried to run `test -f && cat` via cmd.exe.
+	envPath := filepath.Join(cfg.ComposeDir, ".env")
+	b, err := os.ReadFile(envPath)
+	if err != nil {
+		if os.IsNotExist(err) {
 			return map[string]string{}, nil
 		}
-		content = out
-	} else {
-		b, err := os.ReadFile(envPath)
-		if err != nil {
-			log.Err(err).Msg("failed to read env")
-			return map[string]string{}, err
-		}
-		content = string(b)
+		log.Err(err).Msg("failed to read env")
+		return map[string]string{}, err
 	}
+	content := string(b)
 
 	m := make(map[string]string)
 	s := bufio.NewScanner(strings.NewReader(content))

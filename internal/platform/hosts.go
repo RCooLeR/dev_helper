@@ -21,6 +21,25 @@ func hostsPath() string {
 	return "/etc/hosts"
 }
 
+func hostsLineHasDomain(line, domain string) bool {
+	fields := strings.Fields(line)
+	if len(fields) < 2 {
+		return false
+	}
+	for _, field := range fields[1:] {
+		if field == "#" {
+			break
+		}
+		if strings.HasPrefix(field, "#") {
+			break
+		}
+		if field == domain {
+			return true
+		}
+	}
+	return false
+}
+
 func AddHost(domain string) error {
 	domain = strings.TrimSpace(domain)
 	if domain == "" {
@@ -39,7 +58,7 @@ func AddHost(domain string) error {
 		if l == "" || strings.HasPrefix(l, "#") {
 			continue
 		}
-		if strings.Contains(" "+l+" ", " "+domain+" ") || strings.HasSuffix(l, " "+domain) {
+		if hostsLineHasDomain(l, domain) {
 			return nil
 		}
 	}
@@ -78,7 +97,7 @@ func RemoveHost(domain string) error {
 	lines := strings.Split(string(b), "\n")
 	out := make([]string, 0, len(lines))
 	for _, line := range lines {
-		if strings.Contains(line, domain) && strings.Contains(line, "devhelper") {
+		if hostsLineHasDomain(line, domain) && strings.Contains(line, "devhelper") {
 			continue
 		}
 		out = append(out, line)

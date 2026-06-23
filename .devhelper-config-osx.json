@@ -7,7 +7,7 @@
   "compose_dir": "./projects",
   "default_domain_pattern": "<project>.<company>.local",
   "mysql_service": "mysql-8.4",
-  "mysql9_service": "mysql-9.6",
+  "mysql9_service": "mysql-9.7",
   "mariadb10_service": "mariadb10",
   "mariadb12_service": "mariadb12",
   "postgres_service": "postgres",

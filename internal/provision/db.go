@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,12 +28,62 @@ type pgTarget struct {
 	superPass string
 }
 
+// normalizeDBEngine is the single place where UI/CLI aliases become the
+// canonical names stored in projects. Keeping this small translation layer
+// prevents version bumps (for example MySQL 9.6 -> 9.7) from leaking through
+// the rest of the codebase.
+func normalizeDBEngine(engine string) string {
+	switch strings.ToLower(strings.TrimSpace(engine)) {
+	case "mysql", "mysql-8", "mysql-8.4":
+		return "mysql-8.4"
+	case "mysql9", "mysql-9", "mysql-9.6", "mysql-9.7":
+		return "mysql-9.7"
+	case "mariadb10", "mariadb-10", "mariadb-10.6":
+		return "mariadb10"
+	case "mariadb12", "mariadb-12":
+		return "mariadb12"
+	case "postgres", "postgresql", "postgresql18":
+		return "postgres"
+	default:
+		return strings.ToLower(strings.TrimSpace(engine))
+	}
+}
+
+func isSupportedDB(engine string) bool {
+	switch normalizeDBEngine(engine) {
+	case "mysql-8.4", "mysql-9.7", "mariadb10", "mariadb12", "postgres":
+		return true
+	default:
+		return false
+	}
+}
+
+// mysqlIdent/mysqlString/pgIdent/pgString are tiny quoting helpers for DDL.
+// The current project names are sanitized before reaching this layer, but the
+// store is user-editable JSON and older stores may contain values created by
+// older versions. Quoting here keeps DB operations safe at the final boundary.
+func mysqlIdent(s string) string {
+	return "`" + strings.ReplaceAll(s, "`", "``") + "`"
+}
+
+func mysqlString(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
+func pgIdent(s string) string {
+	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+}
+
+func pgString(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
 func resolveMySQLTarget(cfg app.Config, engine string) (mysqlTarget, bool) {
-	engine = strings.ToLower(strings.TrimSpace(engine))
+	engine = normalizeDBEngine(engine)
 	switch engine {
 	case "mysql-8.4":
 		return mysqlTarget{service: cfg.MySQLService, host: cfg.MySQLHost, port: cfg.MySQLPort, rootPass: cfg.MySQLRootPass}, true
-	case "mysql-9.6":
+	case "mysql-9.7":
 		return mysqlTarget{service: cfg.MySQL9Service, host: cfg.MySQLHost, port: cfg.MySQL9Port, rootPass: cfg.MySQLRootPass}, true
 	case "mariadb10":
 		return mysqlTarget{service: cfg.MariaDB10Service, host: cfg.MySQLHost, port: cfg.MariaDB10Port, rootPass: cfg.MySQLRootPass}, true
@@ -44,7 +95,7 @@ func resolveMySQLTarget(cfg app.Config, engine string) (mysqlTarget, bool) {
 }
 
 func resolvePGTarget(cfg app.Config, engine string) (pgTarget, bool) {
-	engine = strings.ToLower(strings.TrimSpace(engine))
+	engine = normalizeDBEngine(engine)
 	if engine != "postgres" {
 		return pgTarget{}, false
 	}
@@ -65,6 +116,9 @@ func dockerCompose(cfg app.Config, args ...string) (string, error) {
 	return string(out), nil
 }
 
+// ensureServiceUp starts only the service needed for the requested operation.
+// This keeps "create project with MySQL 8.4" from paying the cost of starting
+// Postgres, Redis, every PHP version, and other services in docker-compose.yml.
 func ensureServiceUp(cfg app.Config, service string) error {
 	if strings.TrimSpace(cfg.ComposeDir) == "" {
 		return fmt.Errorf("compose_dir is empty (run: devhelper init)")
@@ -74,7 +128,7 @@ func ensureServiceUp(cfg app.Config, service string) error {
 }
 
 func waitTCP(host string, port int, timeout time.Duration) error {
-	addr := fmt.Sprintf("%s:%d", host, port)
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		c, err := net.DialTimeout("tcp", addr, 800*time.Millisecond)
@@ -101,6 +155,9 @@ func psqlExe(cfg app.Config) string {
 	return "psql"
 }
 
+// mysqlPingTarget/psqlPingTarget verify authentication after TCP starts
+// accepting connections. Container ports can open before the database has
+// finished bootstrapping users, so a socket check alone is not enough.
 func mysqlPingTarget(cfg app.Config, t mysqlTarget) error {
 	sql := "SELECT 1;"
 	args := []string{
@@ -170,6 +227,7 @@ func waitPostgresReady(cfg app.Config, t pgTarget) error {
 }
 
 func CreateMySQLDBForEngine(cfg app.Config, engine, dbName, user, pass string) error {
+	engine = normalizeDBEngine(engine)
 	t, ok := resolveMySQLTarget(cfg, engine)
 	if !ok {
 		return fmt.Errorf("unknown engine: %s", engine)
@@ -184,9 +242,9 @@ func CreateMySQLDBForEngine(cfg app.Config, engine, dbName, user, pass string) e
 		return err
 	}
 	sql := strings.Join([]string{
-		fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s`;", dbName),
-		fmt.Sprintf("CREATE USER IF NOT EXISTS '%s'@'%%' IDENTIFIED BY '%s';", user, pass),
-		fmt.Sprintf("GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'%%';", dbName, user),
+		fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", mysqlIdent(dbName)),
+		fmt.Sprintf("CREATE USER IF NOT EXISTS %s@'%%' IDENTIFIED BY %s;", mysqlString(user), mysqlString(pass)),
+		fmt.Sprintf("GRANT ALL PRIVILEGES ON %s.* TO %s@'%%';", mysqlIdent(dbName), mysqlString(user)),
 		"FLUSH PRIVILEGES;",
 	}, " ")
 	log.Info().Msgf("Creating MySQL/MariaDB database '%s' and user '%s' (engine=%s)", dbName, user, engine)
@@ -221,10 +279,11 @@ func CreatePostgresDB(cfg app.Config, dbName, user, pass string) error {
 		return err
 	}
 	log.Info().Msgf("Creating Postgres database '%s' and user '%s'", dbName, user)
-	// Create role if missing (safe inside DO).
+	// Create role if missing. PostgreSQL supports this safely inside a DO block,
+	// unlike CREATE DATABASE, which must be executed as a top-level statement.
 	sqlRole := fmt.Sprintf(
-		"DO $$BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '%s') THEN CREATE ROLE %s LOGIN PASSWORD '%s'; END IF; END$$;",
-		user, user, pass,
+		"DO $$BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = %s) THEN CREATE ROLE %s LOGIN PASSWORD %s; END IF; END$$;",
+		pgString(user), pgIdent(user), pgString(pass),
 	)
 	cmdRole := exec.Command(psqlExe(cfg),
 		"-h", t.host,
@@ -241,14 +300,14 @@ func CreatePostgresDB(cfg app.Config, dbName, user, pass string) error {
 		return fmt.Errorf("postgres create role failed: %w; %s", err, strings.TrimSpace(string(out)))
 	}
 
-	// CREATE DATABASE cannot run inside a function/transaction, so we do existence check in Go
-	// and then run plain CREATE DATABASE as a separate statement.
+	// CREATE DATABASE cannot run inside a function/transaction, so we do the
+	// existence check in Go and then run plain CREATE DATABASE separately.
 	cmdCheck := exec.Command(psqlExe(cfg),
 		"-h", t.host,
 		"-p", fmt.Sprintf("%d", t.port),
 		"-U", "postgres",
 		"-d", "postgres",
-		"-tAc", fmt.Sprintf("SELECT 1 FROM pg_database WHERE datname='%s'", dbName),
+		"-tAc", fmt.Sprintf("SELECT 1 FROM pg_database WHERE datname=%s", pgString(dbName)),
 	)
 	cmdCheck.Env = append(os.Environ(), "PGPASSWORD="+t.superPass)
 	chkOut, err := cmdCheck.CombinedOutput()
@@ -266,7 +325,7 @@ func CreatePostgresDB(cfg app.Config, dbName, user, pass string) error {
 		"-U", "postgres",
 		"-d", "postgres",
 		"-v", "ON_ERROR_STOP=1",
-		"-c", fmt.Sprintf("CREATE DATABASE %s OWNER %s", dbName, user),
+		"-c", fmt.Sprintf("CREATE DATABASE %s OWNER %s", pgIdent(dbName), pgIdent(user)),
 	)
 	cmdDB.Env = append(os.Environ(), "PGPASSWORD="+t.superPass)
 	out, err = cmdDB.CombinedOutput()
@@ -279,9 +338,9 @@ func CreatePostgresDB(cfg app.Config, dbName, user, pass string) error {
 }
 
 func createDB(cfg app.Config, engine, dbName, user, pass string) error {
-	engine = strings.ToLower(strings.TrimSpace(engine))
+	engine = normalizeDBEngine(engine)
 	switch engine {
-	case "mysql-8.4", "mysql-9.6", "mariadb10", "mariadb12":
+	case "mysql-8.4", "mysql-9.7", "mariadb10", "mariadb12":
 		return CreateMySQLDBForEngine(cfg, engine, dbName, user, pass)
 	case "postgres":
 		return CreatePostgresDB(cfg, dbName, user, pass)
@@ -291,6 +350,7 @@ func createDB(cfg app.Config, engine, dbName, user, pass string) error {
 }
 
 func DropMySQLDBForEngine(cfg app.Config, engine, dbName, user string) error {
+	engine = normalizeDBEngine(engine)
 	t, ok := resolveMySQLTarget(cfg, engine)
 	if !ok {
 		return fmt.Errorf("unknown engine: %s", engine)
@@ -305,8 +365,8 @@ func DropMySQLDBForEngine(cfg app.Config, engine, dbName, user string) error {
 		return err
 	}
 	sql := strings.Join([]string{
-		fmt.Sprintf("DROP DATABASE IF EXISTS `%s`;", dbName),
-		fmt.Sprintf("DROP USER IF EXISTS '%s'@'%%';", user),
+		fmt.Sprintf("DROP DATABASE IF EXISTS %s;", mysqlIdent(dbName)),
+		fmt.Sprintf("DROP USER IF EXISTS %s@'%%';", mysqlString(user)),
 		"FLUSH PRIVILEGES;",
 	}, " ")
 	args := []string{
@@ -348,14 +408,14 @@ func DropPostgresDB(cfg app.Config, dbName, user string) error {
 
 	// Terminate any open connections to the DB (required before DROP DATABASE).
 	cmdTerm := exec.Command(psqlExe(cfg), append(baseArgs,
-		"-c", fmt.Sprintf("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='%s' AND pid <> pg_backend_pid();", dbName),
+		"-c", fmt.Sprintf("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname=%s AND pid <> pg_backend_pid();", pgString(dbName)),
 	)...)
 	cmdTerm.Env = append(os.Environ(), "PGPASSWORD="+t.superPass)
 	_, _ = cmdTerm.CombinedOutput() // best-effort
 
 	// Drop database (cannot run inside a function/transaction).
 	cmdDB := exec.Command(psqlExe(cfg), append(baseArgs,
-		"-c", fmt.Sprintf("DROP DATABASE IF EXISTS %s;", dbName),
+		"-c", fmt.Sprintf("DROP DATABASE IF EXISTS %s;", pgIdent(dbName)),
 	)...)
 	cmdDB.Env = append(os.Environ(), "PGPASSWORD="+t.superPass)
 	out, err := cmdDB.CombinedOutput()
@@ -364,7 +424,7 @@ func DropPostgresDB(cfg app.Config, dbName, user string) error {
 	}
 
 	// Drop role if exists.
-	sqlRole := fmt.Sprintf("DO $$BEGIN IF EXISTS (SELECT FROM pg_roles WHERE rolname='%s') THEN DROP ROLE %s; END IF; END$$;", user, user)
+	sqlRole := fmt.Sprintf("DO $$BEGIN IF EXISTS (SELECT FROM pg_roles WHERE rolname=%s) THEN DROP ROLE %s; END IF; END$$;", pgString(user), pgIdent(user))
 	cmdRole := exec.Command(psqlExe(cfg), append(baseArgs,
 		"-c", sqlRole,
 	)...)
@@ -377,9 +437,9 @@ func DropPostgresDB(cfg app.Config, dbName, user string) error {
 }
 
 func dropDB(cfg app.Config, engine, dbName, user string) error {
-	engine = strings.ToLower(strings.TrimSpace(engine))
+	engine = normalizeDBEngine(engine)
 	switch engine {
-	case "mysql-8.4", "mysql-9.6", "mariadb10", "mariadb12":
+	case "mysql-8.4", "mysql-9.7", "mariadb10", "mariadb12":
 		return DropMySQLDBForEngine(cfg, engine, dbName, user)
 	case "postgres":
 		return DropPostgresDB(cfg, dbName, user)
@@ -402,7 +462,7 @@ func ReplaceSQL(cfg app.Config, engine, dbName, dbUser, dbPass, dumpFile string)
 }
 
 func ImportSQL(cfg app.Config, engine, dbName, dumpFile string) error {
-	engine = strings.ToLower(strings.TrimSpace(engine))
+	engine = normalizeDBEngine(engine)
 	dumpFile = strings.TrimSpace(dumpFile)
 	if dumpFile == "" {
 		return fmt.Errorf("dump file is required")
@@ -415,7 +475,7 @@ func ImportSQL(cfg app.Config, engine, dbName, dumpFile string) error {
 	defer f.Close()
 
 	switch engine {
-	case "mysql-8.4", "mysql-9.6", "mariadb10", "mariadb12":
+	case "mysql-8.4", "mysql-9.7", "mariadb10", "mariadb12":
 		t, ok := resolveMySQLTarget(cfg, engine)
 		if !ok {
 			return fmt.Errorf("unknown engine: %s", engine)

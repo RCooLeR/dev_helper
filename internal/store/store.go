@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -41,6 +43,8 @@ type Store struct {
 	st   State
 }
 
+// Open loads the JSON store from disk. Missing files are treated as an empty
+// store so first-run setup does not require precreating data/devhelper.store.json.
 func Open(path string) (*Store, error) {
 	s := &Store{path: path}
 	if err := s.load(); err != nil {
@@ -76,15 +80,22 @@ func (s *Store) saveLocked() error {
 	return os.WriteFile(s.path, b, 0o644)
 }
 
+// newID returns a compact random identifier for UI keys and future references.
+// It is not meant to encode business meaning; company+project is still the
+// human-facing unique key.
 func newID() string {
 	var b [12]byte
-	_, _ = rand.Read(b[:])
+	if _, err := io.ReadFull(rand.Reader, b[:]); err != nil {
+		panic(fmt.Errorf("generate project id: %w", err))
+	}
 	return hex.EncodeToString(b[:])
 }
 
 func (s *Store) List() []Project {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Return a copy so callers cannot mutate the in-memory store without going
+	// through Upsert/Delete and saveLocked.
 	out := make([]Project, len(s.st.Projects))
 	copy(out, s.st.Projects)
 	return out
@@ -113,6 +124,7 @@ func (s *Store) Upsert(p Project) (Project, error) {
 
 	for i, ex := range s.st.Projects {
 		if ex.Company == p.Company && ex.Name == p.Name {
+			// Updating a project should not make it look newly created in the UI.
 			p.ID = ex.ID
 			p.CreatedAt = ex.CreatedAt
 			s.st.Projects[i] = p
