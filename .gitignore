@@ -24,6 +24,9 @@ go.work.sum
 
 # env file
 .env
+.env.*
+!.env.example
+!.env.*.example
 
 ### Linux template
 *~
@@ -176,8 +179,43 @@ fabric.properties
 # Android studio 3.1+ serialized cache file
 .idea/caches/build_file_checksums.ser
 
-projects/apps/
-!projects/apps/.gitkeep
-/projects/ssh/
+# Devhelper local/company workspace data
+/projects/apps/**
+!/projects/apps/.gitkeep
+/projects/ssh/**
 !/projects/ssh/.gitkeep
-/projects/data/devhelper.store.json
+/projects/data/**
+!/projects/data/.gitkeep
+/projects/docker/**
+/projects/.env
+/projects/.env.*
+!/projects/.env.example
+!/projects/.env.*.example
+
+# Generated/customer-specific server config and local TLS material
+/projects/containers/nginx/conf/**
+/projects/containers/nginx/ssl/**
+/projects/containers/nginx/external/*.pem
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+*.pfx
+
+# Local dumps, backups, and generated stores
+*.sql
+*.dump
+*.bak
+*.backup
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.7z
+*.rar
+*.store.json
+
+# Per-machine config overrides
+.devhelper-config.local.json
+.devhelper-config.*.local.json
