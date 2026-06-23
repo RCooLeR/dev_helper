@@ -50,7 +50,7 @@ RUN curl -L -o /usr/local/bin/pickle https://github.com/FriendsOfPHP/pickle/rele
 
 RUN apt-get -y install libmagickwand-dev ghostscript  --no-install-recommends \
 	&&   pickle install imagick
-	
+
 RUN pickle install memcached && docker-php-ext-enable memcached
 
 	RUN apt-get update -y \
@@ -111,6 +111,32 @@ RUN apt-get -y update && apt-get install -y  --allow-unauthenticated --fix-missi
 RUN docker-php-ext-install ftp
 
 RUN docker-php-ext-install sockets 
+
+RUN apt-get -y install unixodbc-dev
+RUN pecl channel-update pecl.php.net
+RUN pecl install pdo_sqlsrv-5.11.1 sqlsrv-5.11.1
+RUN printf "; priority=20\nextension=sqlsrv.so\n" > /usr/local/etc/php/conf.d/sqlsrv.ini
+RUN printf "; priority=20\nextension=pdo_sqlsrv.so\n" > /usr/local/etc/php/conf.d/pdo_sqlsrv.ini
+
+RUN apt-get install unixodbc unixodbc-dev -y \
+ && docker-php-ext-configure pdo_odbc --with-pdo-odbc=unixODBC,/usr \
+ && docker-php-ext-install pdo_odbc
+
+
+RUN apt-get install -y gnupg
+RUN install -d -m 0755 /etc/apt/keyrings \
+ && curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+    | gpg --dearmor -o /etc/apt/keyrings/microsoft.gpg \
+ && chmod a+r /etc/apt/keyrings/microsoft.gpg
+RUN curl -fsSL https://packages.microsoft.com/config/debian/10/prod.list \
+    | sed 's#deb \[arch=#deb [signed-by=/etc/apt/keyrings/microsoft.gpg arch=#' \
+    > /etc/apt/sources.list.d/mssql-release.list
+RUN apt-get update
+RUN ACCEPT_EULA=Y apt-get install -y msodbcsql17
+RUN ACCEPT_EULA=Y apt-get install -y mssql-tools
+RUN echo 'export PATH="$PATH:/opt/mssql-tools/bin"' >> ~/.bashrc
+RUN apt-get install -y libgssapi-krb5-2
+
 
 VOLUME /tmp
 # Fix fucking permissions
