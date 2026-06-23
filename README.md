@@ -11,7 +11,7 @@
 
 ## Configuration
 
-Run the tool from the repository root. If `.devhelper-config.json` is missing, devhelper uses built-in defaults and `devhelper init` writes the config plus `projects/.env`.
+Run the tool from the repository root. If `.devhelper-config.json` is missing, devhelper uses built-in defaults and `devhelper init` writes the config, creates local `projects/docker-compose.yml` from `projects/docker-compose.example.yml` when needed, and writes `projects/.env`.
 
 Example Windows config:
 
@@ -56,6 +56,8 @@ Initialize config and Compose environment:
 ```powershell
 devhelper.exe init
 ```
+
+`projects/docker-compose.yml` is local-only and ignored by Git. Edit it freely for private services, mounts, or tunnels. Keep reusable stack changes in `projects/docker-compose.example.yml`.
 
 Start the stack:
 
@@ -110,5 +112,6 @@ devhelper writes runtime files outside Git-tracked project data:
 - certs under `${NGINX_EXTERNAL_ROOT}/certs/<domain>`
 - metadata in `${DATA_ROOT}/devhelper.store.json`
 - Docker Compose env in `${COMPOSE_DIR}/.env`
+- local Docker Compose file at `${COMPOSE_DIR}/docker-compose.yml`
 
 These paths are intentionally ignored by Git so local company/project data stays local.

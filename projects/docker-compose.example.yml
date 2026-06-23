@@ -1,0 +1,101 @@
+name: devhelper
+
+services:
+  nginx:
+    build: ./containers/nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "${NGINX_CONF_ROOT}:/etc/nginx/conf.d"
+      - "${NGINX_EXTERNAL_ROOT}:/etc/nginx/external"
+      - "${APPS_ROOT}:/var/www/apps"
+      - "${DATA_ROOT}/nginx-logs:/var/log/nginx"
+    depends_on:
+      - php83
+      - mysql
+      - postgres
+
+  mysql:
+    build: containers/mysql-8.4
+    environment:
+      MYSQL_ROOT_HOST: "%"
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
+      MYSQL_DATABASE: devhelper
+    ports:
+      - "3384:3306"
+    volumes:
+      - "${DATA_ROOT}/mysql-8.4:/var/lib/mysql"
+    cap_add:
+      - SYS_NICE
+    command: --mysql-native-password=ON
+
+  mysql9:
+    build: containers/mysql-9.7
+    environment:
+      MYSQL_ROOT_HOST: "%"
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
+      MYSQL_DATABASE: devhelper
+    ports:
+      - "3396:3306"
+    volumes:
+      - "${DATA_ROOT}/mysql-9.7:/var/lib/mysql"
+    cap_add:
+      - SYS_NICE
+
+  mariadb10:
+    build: ./containers/mariadb-10.6
+    environment:
+      MARIADB_ROOT_HOST: "%"
+      MARIADB_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
+      MARIADB_DATABASE: devhelper
+    ports:
+      - "33106:3306"
+    volumes:
+      - "${DATA_ROOT}/mariadb10:/var/lib/mysql"
+    cap_add:
+      - SYS_NICE
+
+  mariadb12:
+    build: ./containers/mariadb-12
+    environment:
+      MARIADB_ROOT_HOST: "%"
+      MARIADB_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
+      MARIADB_DATABASE: devhelper
+    ports:
+      - "3312:3306"
+    volumes:
+      - "${DATA_ROOT}/mariadb12:/var/lib/mysql"
+    cap_add:
+      - SYS_NICE
+
+  postgres:
+    image: postgres:18-bookworm
+    restart: always
+    environment:
+      POSTGRES_DB: devhelper
+      POSTGRES_PASSWORD: "${POSTGRES_SUPER_PASSWORD}"
+    ports:
+      - "5434:5432"
+    volumes:
+      - "${DATA_ROOT}/postgres:/var/lib/postgresql"
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    volumes:
+      - "${DATA_ROOT}/redis:/data"
+
+  memcached:
+    image: memcached:1.6-alpine
+    ports: ["11211:11211"]
+
+  php71: { build: ./containers/php/php7.1, volumes: ["${APPS_ROOT}:/var/www/apps"], working_dir: /var/www/apps}
+  php72: { build: ./containers/php/php7.2, volumes: ["${APPS_ROOT}:/var/www/apps"], working_dir: /var/www/apps }
+  php73: { build: ./containers/php/php7.3, volumes: ["${APPS_ROOT}:/var/www/apps"], working_dir: /var/www/apps }
+  php74: { build: ./containers/php/php7.4, volumes: ["${APPS_ROOT}:/var/www/apps"], working_dir: /var/www/apps }
+  php80: { build: ./containers/php/php8.0, volumes: ["${APPS_ROOT}:/var/www/apps"], working_dir: /var/www/apps }
+  php81: { build: ./containers/php/php8.1, volumes: ["${APPS_ROOT}:/var/www/apps"], working_dir: /var/www/apps }
+  php82: { build: ./containers/php/php8.2, volumes: ["${APPS_ROOT}:/var/www/apps"], working_dir: /var/www/apps }
+  php83: { build: ./containers/php/php8.3, volumes: ["${APPS_ROOT}:/var/www/apps"], working_dir: /var/www/apps }
+  php84: { build: ./containers/php/php8.4, volumes: ["${APPS_ROOT}:/var/www/apps"], working_dir: /var/www/apps }

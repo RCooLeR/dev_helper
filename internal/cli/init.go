@@ -87,6 +87,14 @@ func cmdInit(a *app.App) *cli.Command {
 			}
 			a.Cfg = cfg
 
+			// docker-compose.yml is intentionally local-only because developers
+			// often add private services, mounts, or tunnels. A fresh clone still
+			// needs a starting point, so init copies the tracked example only when
+			// the local compose file does not already exist.
+			if err := ensureComposeFile(a.RepoRoot, cfg.ComposeDir); err != nil {
+				return err
+			}
+
 			// Write .env next to docker-compose.yml (ComposeDir).
 			if err := platform.WriteEnv(cfg); err != nil {
 				return err
@@ -99,4 +107,23 @@ func cmdInit(a *app.App) *cli.Command {
 			return nil
 		},
 	}
+}
+
+func ensureComposeFile(repoRoot, composeDir string) error {
+	dst := filepath.Join(composeDir, "docker-compose.yml")
+	if _, err := os.Stat(dst); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	src := filepath.Join(repoRoot, "projects", "docker-compose.example.yml")
+	b, err := os.ReadFile(src)
+	if err != nil {
+		return fmt.Errorf("read compose example: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(dst, b, 0o644)
 }

@@ -187,6 +187,7 @@ fabric.properties
 /projects/data/**
 !/projects/data/.gitkeep
 /projects/docker/**
+/projects/docker-compose.yml
 /projects/.env
 /projects/.env.*
 !/projects/.env.example
