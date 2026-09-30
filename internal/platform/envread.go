@@ -1,20 +1,20 @@
 package platform
 
 import (
-	"bufio"
+	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"devhelper/internal/app"
 
+	"github.com/compose-spec/compose-go/v2/dotenv"
 	"github.com/rs/zerolog/log"
 )
 
 // GetComposeEnv returns a value from (1) process env, then (2) <composeDir>/.env,
 // falling back to the provided default.
 func GetComposeEnv(cfg app.Config, key, fallback string) string {
-	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+	if v, ok := os.LookupEnv(key); ok {
 		return v
 	}
 	m, err := ReadComposeEnv(cfg)
@@ -22,7 +22,7 @@ func GetComposeEnv(cfg app.Config, key, fallback string) string {
 		log.Err(err).Msg("failed to read env")
 		return fallback
 	}
-	if v, ok := m[key]; ok && strings.TrimSpace(v) != "" {
+	if v, ok := m[key]; ok {
 		return v
 	}
 	return fallback
@@ -35,31 +35,17 @@ func ReadComposeEnv(cfg app.Config) (map[string]string, error) {
 	// a WSL path. Reading the file directly avoids shell/quoting differences
 	// and fixes older behavior that tried to run `test -f && cat` via cmd.exe.
 	envPath := filepath.Join(cfg.ComposeDir, ".env")
-	b, err := os.ReadFile(envPath)
+	f, err := os.Open(envPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return map[string]string{}, nil
 		}
-		log.Err(err).Msg("failed to read env")
-		return map[string]string{}, err
+		return nil, err
 	}
-	content := string(b)
-
-	m := make(map[string]string)
-	s := bufio.NewScanner(strings.NewReader(content))
-	for s.Scan() {
-		line := strings.TrimSpace(s.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		i := strings.IndexByte(line, '=')
-		if i <= 0 {
-			continue
-		}
-		k := strings.TrimSpace(line[:i])
-		v := strings.TrimSpace(line[i+1:])
-		v = strings.Trim(v, "\"'")
-		m[k] = v
+	defer f.Close()
+	m, err := dotenv.ParseWithLookup(f, os.LookupEnv)
+	if err != nil {
+		return nil, fmt.Errorf("parse compose .env: %w", err)
 	}
 	return m, nil
 }

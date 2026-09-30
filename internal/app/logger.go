@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -29,17 +30,20 @@ func NewLogger(configLevel string) zerolog.Logger {
 		}
 	}
 	zerolog.SetGlobalLevel(lvl)
-	return zerolog.New(os.Stdout).With().Timestamp().Str("app", "devhelper").Logger().Level(lvl)
+	return zerolog.New(os.Stderr).With().Timestamp().Str("app", "devhelper").Logger().Level(lvl)
 }
 
-func New() *App {
+func New() (*App, error) {
 	repoRoot := detectRepoRoot()
-	cfg, _, _ := LoadOrDefault(repoRoot)
+	cfg, _, err := LoadOrDefault(repoRoot)
+	if err != nil {
+		return nil, fmt.Errorf("load configuration: %w", err)
+	}
 	return &App{
 		Log:      NewLogger(cfg.LogLevel),
 		RepoRoot: repoRoot,
 		Cfg:      cfg,
-	}
+	}, nil
 }
 
 // detectRepoRoot tries hard to find the repo root even if the process is started

@@ -216,6 +216,11 @@ fabric.properties
 *.7z
 *.rar
 *.store.json
+*.store.json.lock
+*.store.json.operations.lock
+
+# Frontend build dependencies (compiled assets are checked in for go build)
+/frontend/node_modules/
 
 # Per-machine config overrides
 .devhelper-config.local.json

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,7 +10,7 @@ import (
 	"devhelper/internal/app"
 	"devhelper/internal/platform"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 func cmdInit(a *app.App) *cli.Command {
@@ -25,21 +26,16 @@ func cmdInit(a *app.App) *cli.Command {
 			&cli.StringFlag{Name: "mkcert-cli", Value: a.Cfg.MkcertCli},
 			&cli.StringFlag{Name: "docker-cli", Value: a.Cfg.DockerCli},
 		},
-		Action: func(cctx *cli.Context) error {
+		Action: func(ctx context.Context, cmd *cli.Command) error {
 			cfg := a.Cfg
 
-			cfg.RootDir = cctx.String("wsl-root")
-			cfg.HostMirrorDir = cctx.String("host-mirror")
-			cfg.ComposeDir = cctx.String("compose-dir")
-			// Keep compose_dir stable and derived from the repo location unless the user explicitly overrides it.
-			// This prevents accidental "compose_dir points somewhere else" when the app is started from a different CWD.
-			if runtime.GOOS == "windows" && !cctx.IsSet("compose-dir") {
-				cfg.ComposeDir = filepath.Join(a.RepoRoot, "projects")
-			}
-			cfg.MySQLCli = cctx.String("mysql-8.4-cli")
-			cfg.PSQLCli = cctx.String("psql-cli")
-			cfg.MkcertCli = cctx.String("mkcert-cli")
-			cfg.DockerCli = cctx.String("docker-cli")
+			cfg.RootDir = cmd.String("wsl-root")
+			cfg.HostMirrorDir = cmd.String("host-mirror")
+			cfg.ComposeDir = cmd.String("compose-dir")
+			cfg.MySQLCli = cmd.String("mysql-8.4-cli")
+			cfg.PSQLCli = cmd.String("psql-cli")
+			cfg.MkcertCli = cmd.String("mkcert-cli")
+			cfg.DockerCli = cmd.String("docker-cli")
 
 			// Normalize derived WSL paths (Windows uses WSL runtime root by design).
 			if runtime.GOOS == "windows" {
@@ -82,11 +78,6 @@ func cmdInit(a *app.App) *cli.Command {
 				}
 			}
 
-			if err := app.Save(a.RepoRoot, cfg); err != nil {
-				return err
-			}
-			a.Cfg = cfg
-
 			// docker-compose.yml is intentionally local-only because developers
 			// often add private services, mounts, or tunnels. A fresh clone still
 			// needs a starting point, so init copies the tracked example only when
@@ -100,11 +91,15 @@ func cmdInit(a *app.App) *cli.Command {
 				return err
 			}
 
-			fmt.Println("Initialized.")
-			fmt.Println("WSL root:", cfg.RootDir)
-			fmt.Println("Host mirror:", cfg.HostMirrorDir)
-			fmt.Println("Compose dir:", cfg.ComposeDir)
-			return nil
+			// Activate the configuration only when the Compose file and .env
+			// were successfully prepared. A setup failure keeps the old config.
+			if err := app.Save(a.RepoRoot, cfg); err != nil {
+				return err
+			}
+			a.Cfg = cfg
+
+			_, err := fmt.Fprintf(cmd.Writer, "Initialized.\nWSL root: %s\nHost mirror: %s\nCompose dir: %s\n", cfg.RootDir, cfg.HostMirrorDir, cfg.ComposeDir)
+			return err
 		},
 	}
 }

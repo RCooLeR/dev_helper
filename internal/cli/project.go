@@ -1,22 +1,22 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
-	"fmt"
 
 	"devhelper/internal/app"
 	"devhelper/internal/platform"
 	"devhelper/internal/provision"
 	"devhelper/internal/store"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 func cmdProject(a *app.App) *cli.Command {
 	return &cli.Command{
 		Name:  "project",
 		Usage: "Manage projects",
-		Subcommands: []*cli.Command{
+		Commands: []*cli.Command{
 			{
 				Name:  "create",
 				Usage: "Create a project (dirs, nginx conf, hosts, db)",
@@ -27,31 +27,29 @@ func cmdProject(a *app.App) *cli.Command {
 					&cli.StringFlag{Name: "domain"},
 					&cli.StringFlag{Name: "php", Value: "8.3"},
 					&cli.StringFlag{Name: "db", Value: "none"},
-					&cli.StringFlag{Name: "import-file"},
+					&cli.StringFlag{Name: "import-file", TakesFile: true},
 					&cli.BoolFlag{Name: "import"},
 				},
-				Action: func(cctx *cli.Context) error {
+				Action: func(ctx context.Context, cmd *cli.Command) error {
 					cfg := a.Cfg
 					st, err := store.Open(platform.WSLToHost(cfg, cfg.StoreFile))
 					if err != nil {
 						return err
 					}
-					res, err := provision.Create(a, st, provision.CreateRequest{
-						Company:        cctx.String("company"),
-						Project:        cctx.String("project"),
-						Type:           cctx.String("type"),
-						Domain:         cctx.String("domain"),
-						PHP:            cctx.String("php"),
-						DB:             cctx.String("db"),
-						ImportFile:     cctx.String("import-file"),
-						ImportOnCreate: cctx.Bool("import"),
+					res, err := provision.CreateContext(ctx, a, st, provision.CreateRequest{
+						Company:        cmd.String("company"),
+						Project:        cmd.String("project"),
+						Type:           cmd.String("type"),
+						Domain:         cmd.String("domain"),
+						PHP:            cmd.String("php"),
+						DB:             cmd.String("db"),
+						ImportFile:     cmd.String("import-file"),
+						ImportOnCreate: cmd.Bool("import"),
 					})
 					if err != nil {
 						return err
 					}
-					b, _ := json.MarshalIndent(map[string]any{"project": res.Project, "warnings": res.Warnings}, "", "  ")
-					fmt.Println(string(b))
-					return nil
+					return writeJSON(cmd, map[string]any{"project": res.Project, "warnings": res.Warnings})
 				},
 			},
 			{
@@ -61,38 +59,44 @@ func cmdProject(a *app.App) *cli.Command {
 					&cli.StringFlag{Name: "company", Required: true},
 					&cli.StringFlag{Name: "project", Required: true},
 				},
-				Action: func(cctx *cli.Context) error {
+				Action: func(ctx context.Context, cmd *cli.Command) error {
 					cfg := a.Cfg
 					st, err := store.Open(platform.WSLToHost(cfg, cfg.StoreFile))
 					if err != nil {
 						return err
 					}
-					res, err := provision.Drop(a, st, provision.DropRequest{
-						Company: cctx.String("company"),
-						Project: cctx.String("project"),
+					res, err := provision.DropContext(ctx, a, st, provision.DropRequest{
+						Company: cmd.String("company"),
+						Project: cmd.String("project"),
 					})
 					if err != nil {
 						return err
 					}
-					b, _ := json.MarshalIndent(map[string]any{"ok": true, "warnings": res.Warnings}, "", "  ")
-					fmt.Println(string(b))
-					return nil
+					return writeJSON(cmd, map[string]any{"ok": true, "warnings": res.Warnings})
 				},
 			},
 			{
 				Name:  "list",
 				Usage: "List projects",
-				Action: func(cctx *cli.Context) error {
+				Action: func(ctx context.Context, cmd *cli.Command) error {
 					cfg := a.Cfg
 					st, err := store.Open(platform.WSLToHost(cfg, cfg.StoreFile))
 					if err != nil {
 						return err
 					}
-					b, _ := json.MarshalIndent(st.List(), "", "  ")
-					fmt.Println(string(b))
-					return nil
+					projects, err := st.List()
+					if err != nil {
+						return err
+					}
+					return writeJSON(cmd, projects)
 				},
 			},
 		},
 	}
+}
+
+func writeJSON(cmd *cli.Command, value any) error {
+	encoder := json.NewEncoder(cmd.Writer)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(value)
 }

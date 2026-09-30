@@ -1,12 +1,14 @@
 package provision
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"devhelper/internal/app"
 	"devhelper/internal/platform"
@@ -15,8 +17,12 @@ import (
 )
 
 func CertInit(cfg app.Config) error {
+	return CertInitContext(context.Background(), cfg)
+}
+
+func CertInitContext(ctx context.Context, cfg app.Config) error {
 	log.Info().Msg("CertInit called")
-	_, err := runHost(cfg.MkcertCli, "-install")
+	_, err := runHostContext(ctx, cfg.MkcertCli, "-install")
 	if err != nil {
 		log.Error().Err(err).Msg("mkcert -install failed")
 		return fmt.Errorf("mkcert -install failed: %w", err)
@@ -27,14 +33,20 @@ func CertInit(cfg app.Config) error {
 	if runtime.GOOS == "windows" {
 		hostCertsDir = platform.WSLToHost(cfg, certsDirRuntime)
 	}
-	_ = os.MkdirAll(hostCertsDir, 0o755)
-	return nil
+	return os.MkdirAll(hostCertsDir, 0o755)
 }
 
 func CertIssue(cfg app.Config, domain string) error {
+	return CertIssueContext(context.Background(), cfg, domain)
+}
+
+func CertIssueContext(ctx context.Context, cfg app.Config, domain string) error {
 	domain = strings.TrimSpace(domain)
-	if domain == "" {
-		return fmt.Errorf("domain required")
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := validateDomain(domain); err != nil {
+		return err
 	}
 
 	certDirRuntime := filepath.ToSlash(filepath.Join(cfg.NginxExternalRoot, "certs", domain))
@@ -49,7 +61,7 @@ func CertIssue(cfg app.Config, domain string) error {
 	certFile := filepath.Join(hostCertDir, "cert.pem")
 	keyFile := filepath.Join(hostCertDir, "key.pem")
 	log.Info().Msgf("Creating cert.pem and key.pem for domain %s", domain)
-	_, err := runHost(cfg.MkcertCli, "-cert-file", certFile, "-key-file", keyFile, domain)
+	_, err := runHostContext(ctx, cfg.MkcertCli, "-cert-file", certFile, "-key-file", keyFile, domain)
 	if err != nil {
 		log.Error().Err(err).Msg("mkcert -cert failed")
 		return fmt.Errorf("mkcert issue failed: %w", err)
@@ -68,11 +80,21 @@ func CertIssue(cfg app.Config, domain string) error {
 }
 
 func runHost(exe string, args ...string) (string, error) {
+	return runHostContext(context.Background(), exe, args...)
+}
+
+func runHostContext(ctx context.Context, exe string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
 	if strings.TrimSpace(exe) == "" {
 		exe = "mkcert"
 	}
-	cmd := exec.Command(exe, args...)
+	cmd := exec.CommandContext(ctx, exe, args...)
+	cmd.WaitDelay = 2 * time.Second
 	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return string(out), ctx.Err()
+	}
 	if err != nil {
 		return string(out), fmt.Errorf("%w: %s", err, string(out))
 	}

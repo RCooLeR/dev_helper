@@ -6,7 +6,7 @@
 
 - Docker Desktop and Docker Compose.
 - `mkcert` for local HTTPS certificates.
-- MySQL client and PostgreSQL `psql` client on the host.
+- Database clients are used inside the selected Compose container by default. Set `mysql_cli` / `psql_cli` to use a host client instead.
 - On Windows, WSL2 with Ubuntu is the default runtime filesystem.
 
 ## Configuration
@@ -26,8 +26,8 @@ Example Windows config:
   "nginx_external_root": "/data/projects/containers/nginx/external",
   "compose_dir": "D:\\Development\\projects",
   "default_domain_pattern": "<project>.<company>.local",
-  "mysql_service": "mysql-8.4",
-  "mysql9_service": "mysql-9.7",
+  "mysql_service": "mysql",
+  "mysql9_service": "mysql9",
   "mariadb10_service": "mariadb10",
   "mariadb12_service": "mariadb12",
   "postgres_service": "postgres",
@@ -97,6 +97,14 @@ Import a dump:
 devhelper.exe db import --company company --project app --file D:\dumps\app.sql
 ```
 
+Repair a database missing from an existing project (including projects saved by older versions after a failed database creation):
+
+```powershell
+devhelper.exe db ensure --company company --project app
+```
+
+This reuses the stored database name and credentials, creates missing database/user objects, and preserves tables. Shared legacy database/login ownership is reported for manual resolution. Repeating `project create` for an existing project is rejected to protect credentials and configuration.
+
 Drop a project:
 
 ```powershell
@@ -115,3 +123,23 @@ devhelper writes runtime files outside Git-tracked project data:
 - local Docker Compose file at `${COMPOSE_DIR}/docker-compose.yml`
 
 These paths are intentionally ignored by Git so local company/project data stays local.
+
+Project metadata keeps the managed per-project credentials in `db_user` / `db_pass`. `db_connections` records observed application database dependencies and their configuration sources without passwords; its observed login can differ from the managed login. `db_host` / `db_port` describe the primary endpoint, while `db_external` marks a primary database as externally managed. These endpoint fields are inventory; local operations still target the configured Compose service or native client endpoint.
+
+Drop, replacement, and `db ensure` check other projects' local secondary database references as well as primary ownership. Ordinary imports do not perform this shared-database check. An external primary database blocks ensure, import, and replacement; dropping its project may remove local files and metadata but skips database cleanup.
+
+## Build and test
+
+Go 1.27.1 or newer is required. The Go toolchain can download the required version automatically. The production web assets are checked in, so a normal Go build needs no Node.js installation:
+
+```powershell
+go build -o devhelper.exe ./cmd/devhelper
+go test ./cmd/... ./internal/...
+go vet ./cmd/... ./internal/...
+```
+
+Use these scoped package patterns in a working development stack: `./...` also walks potentially very large local `projects/apps` and `projects/data` directories. On a clean checkout, `go test ./...` works as usual.
+
+For UI changes, follow [frontend/README.md](frontend/README.md), rebuild the assets, then rebuild Go. The embedded React UI works without external CDN connections.
+
+See [the migration and analysis report](docs/MIGRATION_2026-09.md) for dependency versions, behavior changes, test coverage, and compatibility notes.

@@ -1,11 +1,15 @@
 package httpserver
 
 import (
+	"bytes"
 	"embed"
-	"encoding/json"
+	"encoding/json/v2"
+	"html/template"
+	"io"
 	"net/http"
 	"path"
 	"strings"
+	"time"
 
 	"devhelper/internal/app"
 	"devhelper/internal/provision"
@@ -15,7 +19,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-//go:embed ui/*.html ui/*.css ui/*.png
+//go:embed ui
 var uiFS embed.FS
 
 type Server struct {
@@ -29,7 +33,7 @@ func New(a *app.App, st *store.Store) (*Server, error) {
 
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.Recoverer, middleware.RealIP, middleware.RequestID, middleware.Logger)
+	r.Use(middleware.RequestID, s.requestLog, middleware.Recoverer)
 
 	r.Get("/", s.pageIndex)
 	r.Get("/new", s.pageIndex)
@@ -61,6 +65,8 @@ func (s *Server) Router() http.Handler {
 		}
 		ext := strings.ToLower(path.Ext(p))
 		switch ext {
+		case ".js":
+			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		case ".css":
 			w.Header().Set("Content-Type", "text/css; charset=utf-8")
 		case ".png":
@@ -75,7 +81,21 @@ func (s *Server) Router() http.Handler {
 		w.Write(b)
 	})
 
-	return r
+	// This localhost app performs privileged filesystem and DB operations.
+	// Go's browser-origin middleware rejects cross-site mutation requests.
+	return http.NewCrossOriginProtection().Handler(r)
+}
+
+func (s *Server) requestLog(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+		logger := s.App.Log.With().Str("request_id", middleware.GetReqID(r.Context())).Logger()
+		next.ServeHTTP(ww, r.WithContext(logger.WithContext(r.Context())))
+		logger.Info().Str("method", r.Method).Str("path", r.URL.Path).
+			Int("status", ww.Status()).Int("bytes", ww.BytesWritten()).
+			Dur("duration_ms", time.Since(start)).Msg("HTTP request")
+	})
 }
 
 func (s *Server) pageIndex(w http.ResponseWriter, r *http.Request) {
@@ -84,12 +104,29 @@ func (s *Server) pageIndex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "index.html not found", http.StatusInternalServerError)
 		return
 	}
+	tmpl, err := template.New("index").Parse(string(b))
+	if err != nil {
+		http.Error(w, "invalid page template", http.StatusInternalServerError)
+		return
+	}
+	var rendered bytes.Buffer
+	if err := tmpl.Execute(&rendered, map[string]any{
+		"Metadata": map[string]string{"defaultDomainPattern": s.App.Cfg.DefaultDomainPattern},
+	}); err != nil {
+		http.Error(w, "page rendering failed", http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(b)
+	_, _ = rendered.WriteTo(w)
 }
 
 func (s *Server) apiList(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"projects": s.Store.List()})
+	projects, err := s.Store.List()
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"projects": projects})
 }
 
 type createReq struct {
@@ -107,11 +144,10 @@ type createReq struct {
 
 func (s *Server) apiCreate(w http.ResponseWriter, r *http.Request) {
 	var req createReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, 400, map[string]any{"error": "bad json"})
+	if !readJSON(w, r, &req) {
 		return
 	}
-	res, err := provision.Create(s.App, s.Store, provision.CreateRequest{
+	res, err := provision.CreateContext(r.Context(), s.App, s.Store, provision.CreateRequest{
 		Company:        req.Company,
 		Project:        req.Project,
 		Type:           req.Type,
@@ -135,11 +171,10 @@ type dropReq struct {
 
 func (s *Server) apiDrop(w http.ResponseWriter, r *http.Request) {
 	var req dropReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, 400, map[string]any{"error": "bad json"})
+	if !readJSON(w, r, &req) {
 		return
 	}
-	res, err := provision.Drop(s.App, s.Store, provision.DropRequest{
+	res, err := provision.DropContext(r.Context(), s.App, s.Store, provision.DropRequest{
 		Company: req.Company,
 		Project: req.Project,
 	})
@@ -159,13 +194,26 @@ type importReq struct {
 
 func (s *Server) apiImport(w http.ResponseWriter, r *http.Request) {
 	var req importReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, 400, map[string]any{"error": "bad json"})
+	if !readJSON(w, r, &req) {
 		return
 	}
-	p, ok := s.Store.Get(req.Company, req.Project)
+	unlock, err := s.Store.LockOperations(r.Context())
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": err.Error()})
+		return
+	}
+	defer unlock()
+	p, ok, err := s.Store.Get(req.Company, req.Project)
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": err.Error()})
+		return
+	}
 	if !ok {
 		writeJSON(w, 404, map[string]any{"error": "project not found"})
+		return
+	}
+	if err := provision.ValidateManagedDatabase(p); err != nil {
+		writeJSON(w, 400, map[string]any{"error": err.Error()})
 		return
 	}
 	if p.DB == "none" {
@@ -173,12 +221,20 @@ func (s *Server) apiImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Replace {
-		if err := provision.ReplaceSQL(s.App.Cfg, p.DB, p.DBName, p.DBUser, p.DBPass, req.File); err != nil {
+		projects, err := s.Store.List()
+		if err == nil {
+			err = provision.ValidateDBReplacement(p, projects)
+		}
+		if err != nil {
+			writeJSON(w, 400, map[string]any{"error": err.Error()})
+			return
+		}
+		if err := provision.ReplaceSQLContext(r.Context(), s.App.Cfg, p.DB, p.DBName, p.DBUser, p.DBPass, req.File); err != nil {
 			writeJSON(w, 400, map[string]any{"error": err.Error()})
 			return
 		}
 	} else {
-		if err := provision.ImportSQL(s.App.Cfg, p.DB, p.DBName, req.File); err != nil {
+		if err := provision.ImportSQLContext(r.Context(), s.App.Cfg, p.DB, p.DBName, req.File); err != nil {
 			writeJSON(w, 400, map[string]any{"error": err.Error()})
 			return
 		}
@@ -187,7 +243,7 @@ func (s *Server) apiImport(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) apiCertInit(w http.ResponseWriter, r *http.Request) {
-	if err := provision.CertInit(s.App.Cfg); err != nil {
+	if err := provision.CertInitContext(r.Context(), s.App.Cfg); err != nil {
 		writeJSON(w, 400, map[string]any{"error": err.Error()})
 		return
 	}
@@ -200,11 +256,10 @@ type certIssueReq struct {
 
 func (s *Server) apiCertIssue(w http.ResponseWriter, r *http.Request) {
 	var req certIssueReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, 400, map[string]any{"error": "bad json"})
+	if !readJSON(w, r, &req) {
 		return
 	}
-	if err := provision.CertIssue(s.App.Cfg, req.Domain); err != nil {
+	if err := provision.CertIssueContext(r.Context(), s.App.Cfg, req.Domain); err != nil {
 		writeJSON(w, 400, map[string]any{"error": err.Error()})
 		return
 	}
@@ -212,7 +267,28 @@ func (s *Server) apiCertIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		http.Error(w, "response encoding failed", http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	_, _ = w.Write(append(b, '\n'))
+}
+
+func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
+	const maxRequestBytes = 1 << 20
+	b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRequestBytes))
+	if err != nil {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"error": "request body exceeds 1 MiB or could not be read"})
+		return false
+	}
+	// v2 rejects duplicate keys and invalid UTF-8; Unmarshal also rejects
+	// concatenated documents instead of silently ignoring trailing input.
+	if bytes.Equal(bytes.TrimSpace(b), []byte("null")) || json.Unmarshal(b, v, json.RejectUnknownMembers(true)) != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "expected one JSON object with valid fields"})
+		return false
+	}
+	return true
 }

@@ -50,7 +50,7 @@ RUN curl -L -o /usr/local/bin/pickle https://github.com/FriendsOfPHP/pickle/rele
 
 RUN apt-get -y install libmagickwand-dev ghostscript  --no-install-recommends \
 	&&   pickle install imagick
-
+	
 RUN pickle install memcached && docker-php-ext-enable memcached
 
 	RUN apt-get update -y \
@@ -150,5 +150,5 @@ RUN if getent group www-data >/dev/null; then \
       groupadd -g ${PGID} www-data; \
     fi \
  && usermod -u ${PUID} -g ${PGID} www-data
-
+	
 CMD ["sh", "-c", "composer self-update && php-fpm"]

@@ -1,10 +1,14 @@
 package provision
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"fmt"
-	"net"
+	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +19,7 @@ import (
 )
 
 type mysqlTarget struct {
+	client   string
 	service  string
 	host     string
 	port     int
@@ -86,9 +91,9 @@ func resolveMySQLTarget(cfg app.Config, engine string) (mysqlTarget, bool) {
 	case "mysql-9.7":
 		return mysqlTarget{service: cfg.MySQL9Service, host: cfg.MySQLHost, port: cfg.MySQL9Port, rootPass: cfg.MySQLRootPass}, true
 	case "mariadb10":
-		return mysqlTarget{service: cfg.MariaDB10Service, host: cfg.MySQLHost, port: cfg.MariaDB10Port, rootPass: cfg.MySQLRootPass}, true
+		return mysqlTarget{client: "mariadb", service: cfg.MariaDB10Service, host: cfg.MySQLHost, port: cfg.MariaDB10Port, rootPass: cfg.MySQLRootPass}, true
 	case "mariadb12":
-		return mysqlTarget{service: cfg.MariaDB12Service, host: cfg.MySQLHost, port: cfg.MariaDB12Port, rootPass: cfg.MySQLRootPass}, true
+		return mysqlTarget{client: "mariadb", service: cfg.MariaDB12Service, host: cfg.MySQLHost, port: cfg.MariaDB12Port, rootPass: cfg.MySQLRootPass}, true
 	default:
 		return mysqlTarget{}, false
 	}
@@ -102,427 +107,416 @@ func resolvePGTarget(cfg app.Config, engine string) (pgTarget, bool) {
 	return pgTarget{service: cfg.PostgresService, host: cfg.PostgresHost, port: cfg.PostgresPort, superPass: cfg.PostgresSuperPass}, true
 }
 
-func dockerCompose(cfg app.Config, args ...string) (string, error) {
+const (
+	databaseReadyTimeout = 90 * time.Second
+	databaseQueryTimeout = 30 * time.Second
+)
+
+func dockerComposeCommand(ctx context.Context, cfg app.Config, args ...string) *exec.Cmd {
 	exe := strings.TrimSpace(cfg.DockerCli)
 	if exe == "" {
 		exe = "docker"
 	}
-	cmd := exec.Command(exe, append([]string{"compose"}, args...)...)
+	cmd := exec.CommandContext(ctx, exe, append([]string{"compose"}, args...)...)
 	cmd.Dir = cfg.ComposeDir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return string(out), fmt.Errorf("docker compose %s failed: %w; output=%s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-	}
-	return string(out), nil
+	cmd.WaitDelay = 2 * time.Second
+	return cmd
 }
 
-// ensureServiceUp starts only the service needed for the requested operation.
-// This keeps "create project with MySQL 8.4" from paying the cost of starting
-// Postgres, Redis, every PHP version, and other services in docker-compose.yml.
-func ensureServiceUp(cfg app.Config, service string) error {
-	if strings.TrimSpace(cfg.ComposeDir) == "" {
-		return fmt.Errorf("compose_dir is empty (run: devhelper init)")
+func commandOutput(cmd *exec.Cmd, operation string, secrets ...string) (string, error) {
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Run()
+	if err != nil {
+		detail := strings.TrimSpace(stderr.String())
+		if detail == "" {
+			detail = strings.TrimSpace(stdout.String())
+		}
+		for _, secret := range secrets {
+			if secret != "" {
+				detail = strings.ReplaceAll(detail, secret, "[redacted]")
+				detail = strings.ReplaceAll(detail, strings.ReplaceAll(secret, "'", "''"), "[redacted]")
+			}
+		}
+		return "", fmt.Errorf("%s: %w; %s", operation, err, detail)
 	}
-	_, err := dockerCompose(cfg, "up", "-d", service)
+	return stdout.String(), nil
+}
+
+// Old releases confused image versions with Compose service names. Preserve
+// exact custom services; fall back only when the old name is absent.
+func selectComposeService(configured string, services []string) (string, error) {
+	configured = strings.TrimSpace(configured)
+	if configured == "" {
+		return "", fmt.Errorf("database service name is empty")
+	}
+	if slices.Contains(services, configured) {
+		return configured, nil
+	}
+	legacy := map[string]string{"mysql-8.4": "mysql", "mysql-9.6": "mysql9", "mysql-9.7": "mysql9"}
+	if fallback := legacy[configured]; fallback != "" && slices.Contains(services, fallback) {
+		return fallback, nil
+	}
+	return "", fmt.Errorf("database service %q is missing from Compose (available: %s)", configured, strings.Join(services, ", "))
+}
+
+// Starting only the requested service avoids rebuilding unrelated PHP services.
+func ensureServiceUpContext(ctx context.Context, cfg app.Config, service string) (string, error) {
+	if strings.TrimSpace(cfg.ComposeDir) == "" {
+		return "", fmt.Errorf("compose_dir is empty (run: devhelper init)")
+	}
+	if strings.TrimSpace(service) == "" {
+		return "", fmt.Errorf("database service name is empty")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	out, err := commandOutput(dockerComposeCommand(ctx, cfg, "config", "--services"), "read Compose services")
+	if err != nil {
+		return "", err
+	}
+	service, err = selectComposeService(service, strings.Fields(out))
+	if err != nil {
+		return "", err
+	}
+	_, err = commandOutput(dockerComposeCommand(ctx, cfg, "up", "-d", "--no-deps", service), "start database service "+service)
+	return service, err
+}
+
+func mysqlCommand(ctx context.Context, cfg app.Config, t mysqlTarget, dbName string, input io.Reader) *exec.Cmd {
+	host, port := t.host, t.port
+	exe := strings.TrimSpace(cfg.MySQLCli)
+	container := exe == ""
+	if container {
+		host, port = "127.0.0.1", 3306
+		exe = t.client
+		if exe == "" {
+			exe = "mysql"
+		}
+	}
+	args := []string{
+		"--no-defaults", "--protocol=tcp", "--connect-timeout=3",
+		"--host=" + host, "--port=" + strconv.Itoa(port), "--user=root",
+		"--batch", "--skip-column-names", "--binary-mode=1", "--default-character-set=utf8mb4",
+	}
+	if dbName != "" {
+		args = append(args, "--database="+dbName)
+	}
+	var cmd *exec.Cmd
+	if container {
+		cmd = dockerComposeCommand(ctx, cfg, append([]string{"exec", "-T", "--env", "MYSQL_PWD", t.service, exe}, args...)...)
+	} else {
+		cmd = exec.CommandContext(ctx, exe, args...)
+		cmd.WaitDelay = 2 * time.Second
+	}
+	// An empty password stays noninteractive; "-p" alone would prompt forever.
+	cmd.Env = append(os.Environ(), "MYSQL_PWD="+t.rootPass)
+	cmd.Stdin = input
+	return cmd
+}
+
+func postgresCommand(ctx context.Context, cfg app.Config, t pgTarget, dbName string, input io.Reader) *exec.Cmd {
+	host, port := t.host, t.port
+	exe := strings.TrimSpace(cfg.PSQLCli)
+	container := exe == ""
+	if container {
+		host, port, exe = "127.0.0.1", 5432, "psql"
+	}
+	args := []string{"-X", "-w", "-h", host, "-p", strconv.Itoa(port), "-U", "postgres", "-d", dbName, "-v", "ON_ERROR_STOP=1", "-qAt", "-f", "-"}
+	var cmd *exec.Cmd
+	if container {
+		cmd = dockerComposeCommand(ctx, cfg, append([]string{"exec", "-T", "--env", "PGPASSWORD", "--env", "PGCONNECT_TIMEOUT", t.service, exe}, args...)...)
+	} else {
+		cmd = exec.CommandContext(ctx, exe, args...)
+		cmd.WaitDelay = 2 * time.Second
+	}
+	cmd.Env = append(os.Environ(), "PGPASSWORD="+t.superPass, "PGCONNECT_TIMEOUT=3")
+	cmd.Stdin = input
+	return cmd
+}
+
+func mysqlQuery(ctx context.Context, cfg app.Config, t mysqlTarget, sql, operation string, secrets ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, databaseQueryTimeout)
+	defer cancel()
+	return commandOutput(mysqlCommand(ctx, cfg, t, "", strings.NewReader(sql)), operation+" ("+t.service+")", append(secrets, t.rootPass)...)
+}
+
+func postgresQuery(ctx context.Context, cfg app.Config, t pgTarget, sql, operation string, secrets ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, databaseQueryTimeout)
+	defer cancel()
+	return commandOutput(postgresCommand(ctx, cfg, t, "postgres", strings.NewReader(sql)), operation+" ("+t.service+")", append(secrets, t.superPass)...)
+}
+
+// Readiness requires an authenticated query, not an open Docker port or a
+// socket on the image's temporary initialization server. Each attempt and the
+// total wait are bounded. Keep the last error so bad credentials are actionable.
+func waitDatabaseReady(ctx context.Context, name string, probe func(context.Context) error) error {
+	ctx, cancel := context.WithTimeout(ctx, databaseReadyTimeout)
+	defer cancel()
+	var lastErr error
+	for {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("%s not ready: %w (last client error: %v)", name, err, lastErr)
+		}
+		attempt, cancelAttempt := context.WithTimeout(ctx, 5*time.Second)
+		lastErr = probe(attempt)
+		cancelAttempt()
+		if lastErr == nil {
+			return nil
+		}
+		var missing *exec.Error
+		var pathErr *os.PathError
+		if errors.As(lastErr, &missing) || errors.As(lastErr, &pathErr) {
+			return lastErr
+		}
+		timer := time.NewTimer(800 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return fmt.Errorf("%s not ready: %w (last client error: %v)", name, ctx.Err(), lastErr)
+		case <-timer.C:
+		}
+	}
+}
+
+func prepareMySQL(ctx context.Context, cfg app.Config, engine string) (mysqlTarget, error) {
+	t, ok := resolveMySQLTarget(cfg, engine)
+	if !ok {
+		return t, fmt.Errorf("unknown engine: %s", engine)
+	}
+	var err error
+	t.service, err = ensureServiceUpContext(ctx, cfg, t.service)
+	if err != nil {
+		return t, err
+	}
+	err = waitDatabaseReady(ctx, engine, func(ctx context.Context) error {
+		_, err := mysqlQuery(ctx, cfg, t, "SELECT 1;", "authenticate database")
+		return err
+	})
+	return t, err
+}
+
+func preparePostgres(ctx context.Context, cfg app.Config) (pgTarget, error) {
+	t, _ := resolvePGTarget(cfg, "postgres")
+	var err error
+	t.service, err = ensureServiceUpContext(ctx, cfg, t.service)
+	if err != nil {
+		return t, err
+	}
+	err = waitDatabaseReady(ctx, "postgres", func(ctx context.Context) error {
+		_, err := postgresQuery(ctx, cfg, t, "SELECT 1;", "authenticate database")
+		return err
+	})
+	return t, err
+}
+
+func CreateMySQLDBForEngineContext(ctx context.Context, cfg app.Config, engine, dbName, user, pass string) error {
+	engine = normalizeDBEngine(engine)
+	t, err := prepareMySQL(ctx, cfg, engine)
+	if err != nil {
+		return err
+	}
+	// Set string-literal semantics explicitly so passwords containing backslashes
+	// or quotes retain their exact value regardless of the server's sql_mode.
+	sql := strings.Join([]string{
+		"SET SESSION sql_mode = 'NO_BACKSLASH_ESCAPES';",
+		fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", mysqlIdent(dbName)),
+		fmt.Sprintf("CREATE USER IF NOT EXISTS %s@'%%' IDENTIFIED BY %s;", mysqlString(user), mysqlString(pass)),
+		fmt.Sprintf("ALTER USER %s@'%%' IDENTIFIED BY %s;", mysqlString(user), mysqlString(pass)),
+		fmt.Sprintf("GRANT ALL PRIVILEGES ON %s.* TO %s@'%%';", mysqlIdent(dbName), mysqlString(user)),
+	}, "\n")
+	_, err = mysqlQuery(ctx, cfg, t, sql, "create database and user", pass)
+	if err == nil {
+		log.Info().Msgf("DB ready (engine=%s) db=%s user=%s", engine, dbName, user)
+	}
 	return err
 }
 
-func waitTCP(host string, port int, timeout time.Duration) error {
-	addr := net.JoinHostPort(host, strconv.Itoa(port))
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		c, err := net.DialTimeout("tcp", addr, 800*time.Millisecond)
-		if err == nil {
-			_ = c.Close()
-			return nil
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	return fmt.Errorf("tcp not ready: %s", addr)
-}
-
-func mysqlExe(cfg app.Config) string {
-	if strings.TrimSpace(cfg.MySQLCli) != "" {
-		return cfg.MySQLCli
-	}
-	return "mysql"
-}
-
-func psqlExe(cfg app.Config) string {
-	if strings.TrimSpace(cfg.PSQLCli) != "" {
-		return cfg.PSQLCli
-	}
-	return "psql"
-}
-
-// mysqlPingTarget/psqlPingTarget verify authentication after TCP starts
-// accepting connections. Container ports can open before the database has
-// finished bootstrapping users, so a socket check alone is not enough.
-func mysqlPingTarget(cfg app.Config, t mysqlTarget) error {
-	sql := "SELECT 1;"
-	args := []string{
-		"--protocol=tcp",
-		"-h", t.host,
-		"-P", fmt.Sprintf("%d", t.port),
-		"-uroot",
-		"-p" + t.rootPass,
-		"-e", sql,
-	}
-	cmd := exec.Command(mysqlExe(cfg), args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("mysql-8.4 ping failed: %w; %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
-}
-
-func psqlPingTarget(cfg app.Config, t pgTarget) error {
-	args := []string{
-		"-h", t.host,
-		"-p", fmt.Sprintf("%d", t.port),
-		"-U", "postgres",
-		"-d", "postgres",
-		"-c", "SELECT 1;",
-	}
-	cmd := exec.Command(psqlExe(cfg), args...)
-	cmd.Env = append(os.Environ(), "PGPASSWORD="+t.superPass)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("psql ping failed: %w; %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
-}
-
-func psqlPing(cfg app.Config) error {
-	t, _ := resolvePGTarget(cfg, "postgres")
-	return psqlPingTarget(cfg, t)
-}
-
-func waitMySQLReady(cfg app.Config, t mysqlTarget) error {
-	if err := waitTCP(t.host, t.port, 60*time.Second); err != nil {
-		return err
-	}
-	deadline := time.Now().Add(60 * time.Second)
-	for time.Now().Before(deadline) {
-		if err := mysqlPingTarget(cfg, t); err == nil {
-			return nil
-		}
-		time.Sleep(800 * time.Millisecond)
-	}
-	return fmt.Errorf("mysql-8.4 auth not ready on %s:%d (check root host and password)", t.host, t.port)
-}
-
-func waitPostgresReady(cfg app.Config, t pgTarget) error {
-	if err := waitTCP(t.host, t.port, 60*time.Second); err != nil {
-		return err
-	}
-	deadline := time.Now().Add(60 * time.Second)
-	for time.Now().Before(deadline) {
-		if err := psqlPingTarget(cfg, t); err == nil {
-			return nil
-		}
-		time.Sleep(800 * time.Millisecond)
-	}
-	return fmt.Errorf("postgres auth not ready on %s:%d (check password)", t.host, t.port)
-}
-
 func CreateMySQLDBForEngine(cfg app.Config, engine, dbName, user, pass string) error {
-	engine = normalizeDBEngine(engine)
-	t, ok := resolveMySQLTarget(cfg, engine)
-	if !ok {
-		return fmt.Errorf("unknown engine: %s", engine)
-	}
-	if strings.TrimSpace(t.service) == "" {
-		return fmt.Errorf("service name missing for engine %s", engine)
-	}
-	if err := ensureServiceUp(cfg, t.service); err != nil {
-		return err
-	}
-	if err := waitMySQLReady(cfg, t); err != nil {
-		return err
-	}
-	sql := strings.Join([]string{
-		fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", mysqlIdent(dbName)),
-		fmt.Sprintf("CREATE USER IF NOT EXISTS %s@'%%' IDENTIFIED BY %s;", mysqlString(user), mysqlString(pass)),
-		fmt.Sprintf("GRANT ALL PRIVILEGES ON %s.* TO %s@'%%';", mysqlIdent(dbName), mysqlString(user)),
-		"FLUSH PRIVILEGES;",
-	}, " ")
-	log.Info().Msgf("Creating MySQL/MariaDB database '%s' and user '%s' (engine=%s)", dbName, user, engine)
-	args := []string{
-		"--protocol=tcp",
-		"-h", t.host,
-		"-P", fmt.Sprintf("%d", t.port),
-		"-uroot",
-		"-p" + t.rootPass,
-		"-e", sql,
-	}
-	cmd := exec.Command(mysqlExe(cfg), args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		log.Error().Err(err).Msgf("MySQL create failed: %s", strings.TrimSpace(string(out)))
-		return fmt.Errorf("mysql-8.4 create failed: %w; %s", err, strings.TrimSpace(string(out)))
-	}
-	log.Info().Msgf("DB ready (engine=%s) db=%s user=%s", engine, dbName, user)
-	return nil
+	return CreateMySQLDBForEngineContext(context.Background(), cfg, engine, dbName, user, pass)
 }
 
 func CreateMySQLDB(cfg app.Config, dbName, user, pass string) error {
 	return CreateMySQLDBForEngine(cfg, "mysql-8.4", dbName, user, pass)
 }
 
-func CreatePostgresDB(cfg app.Config, dbName, user, pass string) error {
-	t, _ := resolvePGTarget(cfg, "postgres")
-	if err := ensureServiceUp(cfg, t.service); err != nil {
+func CreatePostgresDBContext(ctx context.Context, cfg app.Config, dbName, user, pass string) error {
+	t, err := preparePostgres(ctx, cfg)
+	if err != nil {
 		return err
 	}
-	if err := waitPostgresReady(cfg, t); err != nil {
+	// Quote the complete PL/pgSQL body instead of using a fixed dollar delimiter,
+	// which can occur in an otherwise valid password.
+	body := fmt.Sprintf("BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = %s) THEN CREATE ROLE %s LOGIN PASSWORD %s; ELSE ALTER ROLE %s LOGIN PASSWORD %s; END IF; END;",
+		pgString(user), pgIdent(user), pgString(pass), pgIdent(user), pgString(pass))
+	_, err = postgresQuery(ctx, cfg, t, "SET standard_conforming_strings = on;\nDO "+pgString(body)+";", "create database role", pass)
+	if err != nil {
 		return err
 	}
-	log.Info().Msgf("Creating Postgres database '%s' and user '%s'", dbName, user)
-	// Create role if missing. PostgreSQL supports this safely inside a DO block,
-	// unlike CREATE DATABASE, which must be executed as a top-level statement.
-	sqlRole := fmt.Sprintf(
-		"DO $$BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = %s) THEN CREATE ROLE %s LOGIN PASSWORD %s; END IF; END$$;",
-		pgString(user), pgIdent(user), pgString(pass),
-	)
-	cmdRole := exec.Command(psqlExe(cfg),
-		"-h", t.host,
-		"-p", fmt.Sprintf("%d", t.port),
-		"-U", "postgres",
-		"-d", "postgres",
-		"-v", "ON_ERROR_STOP=1",
-		"-c", sqlRole,
-	)
-	cmdRole.Env = append(os.Environ(), "PGPASSWORD="+t.superPass)
-	out, err := cmdRole.CombinedOutput()
+	out, err := postgresQuery(ctx, cfg, t, "SET standard_conforming_strings = on;\nSELECT 1 FROM pg_database WHERE datname="+pgString(dbName)+";", "check database")
 	if err != nil {
-		log.Error().Err(err).Msgf("Postgres create role failed: %s", strings.TrimSpace(string(out)))
-		return fmt.Errorf("postgres create role failed: %w; %s", err, strings.TrimSpace(string(out)))
+		return err
 	}
-
-	// CREATE DATABASE cannot run inside a function/transaction, so we do the
-	// existence check in Go and then run plain CREATE DATABASE separately.
-	cmdCheck := exec.Command(psqlExe(cfg),
-		"-h", t.host,
-		"-p", fmt.Sprintf("%d", t.port),
-		"-U", "postgres",
-		"-d", "postgres",
-		"-tAc", fmt.Sprintf("SELECT 1 FROM pg_database WHERE datname=%s", pgString(dbName)),
-	)
-	cmdCheck.Env = append(os.Environ(), "PGPASSWORD="+t.superPass)
-	chkOut, err := cmdCheck.CombinedOutput()
-	if err != nil {
-		log.Error().Err(err).Msgf("Postgres db exists check failed: %s", strings.TrimSpace(string(chkOut)))
-		return fmt.Errorf("postgres db exists check failed: %w; %s", err, strings.TrimSpace(string(chkOut)))
-	}
-	if strings.TrimSpace(string(chkOut)) != "" {
+	if strings.TrimSpace(out) != "" {
 		return nil
 	}
-
-	cmdDB := exec.Command(psqlExe(cfg),
-		"-h", t.host,
-		"-p", fmt.Sprintf("%d", t.port),
-		"-U", "postgres",
-		"-d", "postgres",
-		"-v", "ON_ERROR_STOP=1",
-		"-c", fmt.Sprintf("CREATE DATABASE %s OWNER %s", pgIdent(dbName), pgIdent(user)),
-	)
-	cmdDB.Env = append(os.Environ(), "PGPASSWORD="+t.superPass)
-	out, err = cmdDB.CombinedOutput()
-	if err != nil {
-		log.Error().Err(err).Msgf("Postgres create db failed: %s", strings.TrimSpace(string(out)))
-		return fmt.Errorf("postgres create db failed: %w; %s", err, strings.TrimSpace(string(out)))
-	}
-	log.Info().Msgf("Postgres database '%s' and user '%s' created or already exist", dbName, user)
-	return nil
+	// PostgreSQL CREATE DATABASE must run outside a transaction.
+	_, err = postgresQuery(ctx, cfg, t, fmt.Sprintf("CREATE DATABASE %s OWNER %s;", pgIdent(dbName), pgIdent(user)), "create database")
+	return err
 }
 
-func createDB(cfg app.Config, engine, dbName, user, pass string) error {
+func CreatePostgresDB(cfg app.Config, dbName, user, pass string) error {
+	return CreatePostgresDBContext(context.Background(), cfg, dbName, user, pass)
+}
+
+func createDBContext(ctx context.Context, cfg app.Config, engine, dbName, user, pass string) error {
 	engine = normalizeDBEngine(engine)
 	switch engine {
 	case "mysql-8.4", "mysql-9.7", "mariadb10", "mariadb12":
-		return CreateMySQLDBForEngine(cfg, engine, dbName, user, pass)
+		return CreateMySQLDBForEngineContext(ctx, cfg, engine, dbName, user, pass)
 	case "postgres":
-		return CreatePostgresDB(cfg, dbName, user, pass)
+		return CreatePostgresDBContext(ctx, cfg, dbName, user, pass)
 	default:
 		return fmt.Errorf("unknown engine: %s", engine)
 	}
 }
 
-func DropMySQLDBForEngine(cfg app.Config, engine, dbName, user string) error {
+func createDB(cfg app.Config, engine, dbName, user, pass string) error {
+	return createDBContext(context.Background(), cfg, engine, dbName, user, pass)
+}
+
+func DropMySQLDBForEngineContext(ctx context.Context, cfg app.Config, engine, dbName, user string) error {
 	engine = normalizeDBEngine(engine)
-	t, ok := resolveMySQLTarget(cfg, engine)
-	if !ok {
-		return fmt.Errorf("unknown engine: %s", engine)
-	}
-	if strings.TrimSpace(t.service) == "" {
-		return fmt.Errorf("service name missing for engine %s", engine)
-	}
-	if err := ensureServiceUp(cfg, t.service); err != nil {
-		return err
-	}
-	if err := waitMySQLReady(cfg, t); err != nil {
-		return err
-	}
-	sql := strings.Join([]string{
-		fmt.Sprintf("DROP DATABASE IF EXISTS %s;", mysqlIdent(dbName)),
-		fmt.Sprintf("DROP USER IF EXISTS %s@'%%';", mysqlString(user)),
-		"FLUSH PRIVILEGES;",
-	}, " ")
-	args := []string{
-		"--protocol=tcp",
-		"-h", t.host,
-		"-P", fmt.Sprintf("%d", t.port),
-		"-uroot",
-		"-p" + t.rootPass,
-		"-e", sql,
-	}
-	cmd := exec.Command(mysqlExe(cfg), args...)
-	out, err := cmd.CombinedOutput()
+	t, err := prepareMySQL(ctx, cfg, engine)
 	if err != nil {
-		return fmt.Errorf("mysql-8.4 drop failed: %w; %s", err, strings.TrimSpace(string(out)))
+		return err
 	}
-	return nil
+	sql := "SET SESSION sql_mode = 'NO_BACKSLASH_ESCAPES';\n" + fmt.Sprintf("DROP DATABASE IF EXISTS %s;", mysqlIdent(dbName))
+	if user != "" {
+		sql += fmt.Sprintf("\nDROP USER IF EXISTS %s@'%%';", mysqlString(user))
+	}
+	_, err = mysqlQuery(ctx, cfg, t, sql, "drop database and user")
+	return err
+}
+
+func DropMySQLDBForEngine(cfg app.Config, engine, dbName, user string) error {
+	return DropMySQLDBForEngineContext(context.Background(), cfg, engine, dbName, user)
 }
 
 func DropMySQLDB(cfg app.Config, dbName, user string) error {
 	return DropMySQLDBForEngine(cfg, "mysql-8.4", dbName, user)
 }
 
-func DropPostgresDB(cfg app.Config, dbName, user string) error {
-	t, _ := resolvePGTarget(cfg, "postgres")
-	if err := ensureServiceUp(cfg, t.service); err != nil {
+func DropPostgresDBContext(ctx context.Context, cfg app.Config, dbName, user string) error {
+	t, err := preparePostgres(ctx, cfg)
+	if err != nil {
 		return err
 	}
-	if err := waitPostgresReady(cfg, t); err != nil {
+	// FORCE closes active sessions atomically with the drop.
+	if _, err = postgresQuery(ctx, cfg, t, fmt.Sprintf("DROP DATABASE IF EXISTS %s WITH (FORCE);", pgIdent(dbName)), "drop database"); err != nil {
 		return err
 	}
-
-	baseArgs := []string{
-		"-h", t.host,
-		"-p", fmt.Sprintf("%d", t.port),
-		"-U", "postgres",
-		"-d", "postgres",
-		"-v", "ON_ERROR_STOP=1",
+	if user == "" {
+		return nil
 	}
-
-	// Terminate any open connections to the DB (required before DROP DATABASE).
-	cmdTerm := exec.Command(psqlExe(cfg), append(baseArgs,
-		"-c", fmt.Sprintf("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname=%s AND pid <> pg_backend_pid();", pgString(dbName)),
-	)...)
-	cmdTerm.Env = append(os.Environ(), "PGPASSWORD="+t.superPass)
-	_, _ = cmdTerm.CombinedOutput() // best-effort
-
-	// Drop database (cannot run inside a function/transaction).
-	cmdDB := exec.Command(psqlExe(cfg), append(baseArgs,
-		"-c", fmt.Sprintf("DROP DATABASE IF EXISTS %s;", pgIdent(dbName)),
-	)...)
-	cmdDB.Env = append(os.Environ(), "PGPASSWORD="+t.superPass)
-	out, err := cmdDB.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("postgres drop db failed: %w; %s", err, strings.TrimSpace(string(out)))
-	}
-
-	// Drop role if exists.
-	sqlRole := fmt.Sprintf("DO $$BEGIN IF EXISTS (SELECT FROM pg_roles WHERE rolname=%s) THEN DROP ROLE %s; END IF; END$$;", pgString(user), pgIdent(user))
-	cmdRole := exec.Command(psqlExe(cfg), append(baseArgs,
-		"-c", sqlRole,
-	)...)
-	cmdRole.Env = append(os.Environ(), "PGPASSWORD="+t.superPass)
-	out, err = cmdRole.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("postgres drop role failed: %w; %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
+	_, err = postgresQuery(ctx, cfg, t, fmt.Sprintf("DROP ROLE IF EXISTS %s;", pgIdent(user)), "drop database role")
+	return err
 }
 
-func dropDB(cfg app.Config, engine, dbName, user string) error {
+func DropPostgresDB(cfg app.Config, dbName, user string) error {
+	return DropPostgresDBContext(context.Background(), cfg, dbName, user)
+}
+
+func dropDBContext(ctx context.Context, cfg app.Config, engine, dbName, user string) error {
 	engine = normalizeDBEngine(engine)
 	switch engine {
 	case "mysql-8.4", "mysql-9.7", "mariadb10", "mariadb12":
-		return DropMySQLDBForEngine(cfg, engine, dbName, user)
+		return DropMySQLDBForEngineContext(ctx, cfg, engine, dbName, user)
 	case "postgres":
-		return DropPostgresDB(cfg, dbName, user)
+		return DropPostgresDBContext(ctx, cfg, dbName, user)
 	default:
 		return fmt.Errorf("unknown engine: %s", engine)
 	}
 }
 
-// ReplaceSQL drops the project's DB (and role/user), recreates it, and imports the given SQL dump.
-// This is useful when you want to "reset" a project to a known state.
-func ReplaceSQL(cfg app.Config, engine, dbName, dbUser, dbPass, dumpFile string) error {
-	engine = strings.ToLower(strings.TrimSpace(engine))
-	if err := dropDB(cfg, engine, dbName, dbUser); err != nil {
-		return err
-	}
-	if err := createDB(cfg, engine, dbName, dbUser, dbPass); err != nil {
-		return err
-	}
-	return ImportSQL(cfg, engine, dbName, dumpFile)
+func dropDB(cfg app.Config, engine, dbName, user string) error {
+	return dropDBContext(context.Background(), cfg, engine, dbName, user)
 }
 
-func ImportSQL(cfg app.Config, engine, dbName, dumpFile string) error {
-	engine = normalizeDBEngine(engine)
-	dumpFile = strings.TrimSpace(dumpFile)
-	if dumpFile == "" {
-		return fmt.Errorf("dump file is required")
+func openSQLDump(dumpFile string) (*os.File, error) {
+	if strings.TrimSpace(dumpFile) == "" {
+		return nil, fmt.Errorf("dump file is required")
 	}
-
 	f, err := os.Open(dumpFile)
+	if err != nil {
+		return nil, fmt.Errorf("open SQL dump: %w", err)
+	}
+	info, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		f.Close()
+		return nil, fmt.Errorf("SQL dump must be a regular file")
+	}
+	if info.Size() == 0 {
+		f.Close()
+		return nil, fmt.Errorf("SQL dump is empty")
+	}
+	return f, nil
+}
+
+// ReplaceSQLContext validates and opens the dump before dropping any data. Keep
+// this same file descriptor through import so a renamed path cannot replace it.
+func ReplaceSQLContext(ctx context.Context, cfg app.Config, engine, dbName, dbUser, dbPass, dumpFile string) error {
+	f, err := openSQLDump(dumpFile)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
+	if err := dropDBContext(ctx, cfg, engine, dbName, dbUser); err != nil {
+		return err
+	}
+	if err := createDBContext(ctx, cfg, engine, dbName, dbUser, dbPass); err != nil {
+		return err
+	}
+	return importSQLReader(ctx, cfg, engine, dbName, f)
+}
 
+func ReplaceSQL(cfg app.Config, engine, dbName, dbUser, dbPass, dumpFile string) error {
+	return ReplaceSQLContext(context.Background(), cfg, engine, dbName, dbUser, dbPass, dumpFile)
+}
+
+func ImportSQLContext(ctx context.Context, cfg app.Config, engine, dbName, dumpFile string) error {
+	f, err := openSQLDump(dumpFile)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return importSQLReader(ctx, cfg, engine, dbName, f)
+}
+
+func ImportSQL(cfg app.Config, engine, dbName, dumpFile string) error {
+	return ImportSQLContext(context.Background(), cfg, engine, dbName, dumpFile)
+}
+
+func importSQLReader(ctx context.Context, cfg app.Config, engine, dbName string, input io.Reader) error {
+	engine = normalizeDBEngine(engine)
 	switch engine {
 	case "mysql-8.4", "mysql-9.7", "mariadb10", "mariadb12":
-		t, ok := resolveMySQLTarget(cfg, engine)
-		if !ok {
-			return fmt.Errorf("unknown engine: %s", engine)
-		}
-		if err := ensureServiceUp(cfg, t.service); err != nil {
-			return err
-		}
-		if err := waitMySQLReady(cfg, t); err != nil {
-			return err
-		}
-		cmd := exec.Command(mysqlExe(cfg),
-			"--protocol=tcp",
-			"-h", t.host,
-			"-P", fmt.Sprintf("%d", t.port),
-			"-uroot",
-			"-p"+t.rootPass,
-			dbName,
-		)
-		cmd.Stdin = f
-		out, err := cmd.CombinedOutput()
+		t, err := prepareMySQL(ctx, cfg, engine)
 		if err != nil {
-			return fmt.Errorf("mysql-8.4 import failed: %w; %s", err, strings.TrimSpace(string(out)))
+			return err
 		}
-		return nil
-
+		_, err = commandOutput(mysqlCommand(ctx, cfg, t, dbName, input), "import SQL ("+engine+")", t.rootPass)
+		return err
 	case "postgres":
-		t, _ := resolvePGTarget(cfg, "postgres")
-		if err := ensureServiceUp(cfg, t.service); err != nil {
-			return err
-		}
-		if err := waitPostgresReady(cfg, t); err != nil {
-			return err
-		}
-		cmd := exec.Command(psqlExe(cfg),
-			"-h", t.host,
-			"-p", fmt.Sprintf("%d", t.port),
-			"-U", "postgres",
-			"-d", dbName,
-			"-v", "ON_ERROR_STOP=1",
-			"-f", dumpFile,
-		)
-		cmd.Env = append(os.Environ(), "PGPASSWORD="+cfg.PostgresSuperPass)
-		out, err := cmd.CombinedOutput()
+		t, err := preparePostgres(ctx, cfg)
 		if err != nil {
-			return fmt.Errorf("postgres import failed: %w; %s", err, strings.TrimSpace(string(out)))
+			return err
 		}
-		return nil
+		_, err = commandOutput(postgresCommand(ctx, cfg, t, dbName, input), "import SQL (postgres)", t.superPass)
+		return err
 	default:
 		return fmt.Errorf("unknown engine: %s", engine)
 	}

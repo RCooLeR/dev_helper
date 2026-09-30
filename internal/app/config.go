@@ -1,8 +1,11 @@
 package app
 
 import (
-	"encoding/json"
+	"bytes"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -61,8 +64,8 @@ type Config struct {
 func DefaultConfig(repoRoot string) Config {
 	c := Config{
 		DefaultDomainPattern: "<project>.<company>.local",
-		MySQLService:         "mysql-8.4",
-		MySQL9Service:        "mysql-9.7",
+		MySQLService:         "mysql",
+		MySQL9Service:        "mysql9",
 		MariaDB10Service:     "mariadb10",
 		MariaDB12Service:     "mariadb12",
 		PostgresService:      "postgres",
@@ -122,9 +125,12 @@ func LoadOrDefault(repoRoot string) (Config, bool, error) {
 		}
 		return Config{}, false, err
 	}
-	var c Config
+	c := DefaultConfig(repoRoot)
+	if bytes.Equal(bytes.TrimSpace(b), []byte("null")) {
+		return Config{}, false, fmt.Errorf("read config %s: expected a JSON object, got null", p)
+	}
 	if err := json.Unmarshal(b, &c); err != nil {
-		return Config{}, false, err
+		return Config{}, false, fmt.Errorf("read config %s: %w", p, err)
 	}
 	// Apply defaults for new fields if they are missing in older configs.
 	def := DefaultConfig(repoRoot)
@@ -134,7 +140,7 @@ func LoadOrDefault(repoRoot string) (Config, bool, error) {
 	if c.MySQLService == "" {
 		c.MySQLService = def.MySQLService
 	}
-	if c.MySQL9Service == "" || c.MySQL9Service == "mysql-9.6" {
+	if c.MySQL9Service == "" {
 		c.MySQL9Service = def.MySQL9Service
 	}
 	if c.MariaDB10Service == "" {
@@ -184,6 +190,9 @@ func Save(repoRoot string, c Config) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
 	}
-	b, _ := json.MarshalIndent(c, "", "  ")
-	return os.WriteFile(p, b, 0o644)
+	b, err := json.Marshal(c, jsontext.WithIndent("  "))
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(p, b, 0o600)
 }

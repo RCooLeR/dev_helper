@@ -119,9 +119,11 @@ RUN docker-php-ext-install sockets
 
 RUN apt-get -y install unixodbc-dev
 RUN pecl channel-update pecl.php.net
-RUN pecl install pdo_sqlsrv-5.11.1 sqlsrv-5.11.1
-RUN printf "; priority=20\nextension=sqlsrv.so\n" > /usr/local/etc/php/conf.d/sqlsrv.ini
-RUN printf "; priority=20\nextension=pdo_sqlsrv.so\n" > /usr/local/etc/php/conf.d/pdo_sqlsrv.ini
+# Install and verify each PHP 8.4-compatible driver before completing the image.
+RUN pecl install pdo_sqlsrv-5.13.3 \
+    && pecl install sqlsrv-5.13.3 \
+    && docker-php-ext-enable sqlsrv pdo_sqlsrv \
+    && php -r 'exit(extension_loaded("sqlsrv") && extension_loaded("pdo_sqlsrv") ? 0 : 1);'
 
 RUN apt-get install unixodbc unixodbc-dev -y \
  && docker-php-ext-configure pdo_odbc --with-pdo-odbc=unixODBC,/usr \
