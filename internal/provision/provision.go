@@ -75,6 +75,12 @@ func defaultDomain(pattern, company, project string) string {
 	return d
 }
 
+// SupportedPHPVersions lists the PHP versions a project can be created with: the phpNN
+// services enabled in docker-compose.yml (see phpServiceName), each built from
+// projects/containers/php/php<version>/. A vhost for any other version stops nginx.
+// The web UI offers the same list.
+var SupportedPHPVersions = []string{"7.1", "7.2", "8.0", "8.2", "8.3", "8.4", "8.5", "8.6"}
+
 func phpServiceName(php string) string {
 	php = strings.TrimSpace(strings.TrimPrefix(php, "php"))
 	php = strings.ReplaceAll(php, ".", "")
@@ -117,7 +123,7 @@ func CreateContext(ctx context.Context, a *app.App, st *store.Store, req CreateR
 	if err := validateDomain(domain); err != nil {
 		return CreateResult{}, err
 	}
-	if !slices.Contains([]string{"7.1", "7.2", "7.3", "7.4", "8.0", "8.1", "8.2", "8.3", "8.4"}, req.PHP) {
+	if !slices.Contains(SupportedPHPVersions, req.PHP) {
 		return CreateResult{}, fmt.Errorf("unsupported PHP version %q", req.PHP)
 	}
 	db := normalizeDBEngine(req.DB)
