@@ -1,104 +1,39 @@
-FROM php:7.4-fpm-buster
+# PHP 7.4.33 from php-eol-patched (github.com/RCooLeR/php-eol-patched): the official image with
+# selected security backports compiled in, plus what the local sites need on top.
+# Settings come from conf/.
+FROM ghcr.io/rcooler/php-eol-patched:7.4.33-debian
 
-# FIX: полностью переписываем sources.list для Debian Buster Archive
-RUN printf "deb http://archive.debian.org/debian buster main contrib non-free\n\
-deb http://archive.debian.org/debian buster-updates main contrib non-free\n\
-deb http://archive.debian.org/debian-security buster/updates main contrib non-free\n" \
-> /etc/apt/sources.list && \
-echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
+COPY conf/php.ini /usr/local/etc/php/
+COPY conf/www.conf /usr/local/etc/php-fpm.d/www.conf
+COPY conf/z-custom.ini /usr/local/etc/php/conf.d/
+# conf.d is read after php.ini, so the image's production defaults would override it.
+RUN rm -f /usr/local/etc/php/conf.d/00-defaults.ini
 
-COPY ./conf/php.ini /usr/local/etc/php/
-COPY ./conf/www.conf /usr/local/etc/php-fpm.d/www.conf
-COPY ./conf/z-custom.ini /usr/local/etc/php/conf.d/
-COPY ./conf/ssmtp.conf /etc/ssmtp/
+RUN apt-get update && apt-get install -y --no-install-recommends $PHPIZE_DEPS \
+        git wget imagemagick mariadb-client ssmtp libgmp-dev libsodium-dev \
+    && rm -rf /var/lib/apt/lists/*
+# After installing ssmtp, whose package would otherwise replace this file.
+COPY conf/ssmtp.conf /etc/ssmtp/
 
-RUN apt-get update && apt-get install -y git \
-	libmemcached-dev \
-	libmemcached11 \
-	wget \
-    	libmemcached-dev \
-    	libfreetype6-dev \
-    	libjpeg62-turbo-dev \
-    	libmcrypt-dev \
-    	libpng-dev \
-    	imagemagick \
-			libicu-dev
+# Bundled extensions the image leaves out, built from its patched source archive.
+RUN [ -e /usr/include/gmp.h ] || ln -s /usr/include/$(gcc -print-multiarch)/gmp.h /usr/include/gmp.h; \
+    docker-php-ext-install gmp ftp posix sodium
 
-RUN  docker-php-ext-install pdo \
-	&& docker-php-ext-install pdo_mysql \
-	&& docker-php-ext-install mysqli \
-	&& docker-php-ext-install opcache \
-	&& docker-php-ext-install gd \
-	&& docker-php-ext-install intl
+# PECL packages from their release URLs: this PEAR cannot parse pecl.php.net's chunked answers.
+RUN pecl install https://pecl.php.net/get/xdebug-3.1.6.tgz \
+    && docker-php-ext-enable xdebug
 
-RUN pecl install redis-4.3.0 \
-		&& pecl install xdebug-2.9.8 \
-	    && docker-php-ext-enable redis
+# WP-CLI is pinned before a release drops this PHP version.
+RUN curl -fsSL https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer \
+    && curl -fsSL -o /usr/local/bin/wp https://github.com/wp-cli/wp-cli/releases/download/v2.12.0/wp-cli-2.12.0.phar \
+    && chmod +x /usr/local/bin/wp
 
-			RUN pecl install memcached \
-&& docker-php-ext-enable memcached
+RUN curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.8/install.sh | bash \
+    && bash -c '. "$HOME/.nvm/nvm.sh" && nvm install stable && nvm alias default stable'
 
-	RUN apt-get update && apt-get install  -y libgmp-dev
-	RUN ln -s /usr/include/$(gcc -print-multiarch)/gmp.h /usr/include/gmp.h
-	RUN docker-php-ext-install gmp
-
-	RUN apt-get install -y libzip-dev \
-        zip
-    RUN docker-php-ext-configure zip
-	RUN docker-php-ext-install zip && docker-php-ext-enable zip
-
-	RUN apt-get update -y \
-	  && apt-get install -y \
-	    libxml2-dev \
-	  && apt-get clean -y \
-	  && docker-php-ext-install soap
-
-RUN apt-get update && apt-get install -y libmagickwand-dev --no-install-recommends && rm -rf /var/lib/apt/lists/*
-RUN pecl install imagick && docker-php-ext-enable imagick
-
-RUN docker-php-ext-install bcmath
-RUN docker-php-ext-enable xdebug
-
-RUN apt-get update \
-	&& apt-get install -y -q --no-install-recommends \
-		msmtp msmtp-mta \
-	&& apt-get clean \
-	&& rm -r /var/lib/apt/lists/*
-
-	RUN  curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar && \
-			 chmod +x wp-cli.phar && \
-			 mv wp-cli.phar /usr/local/bin/wp && \
-			 echo "alias wp='wp'" >> /root/.bashrc && \
-			 wp --info
-
-RUN curl -sS https://getcomposer.org/installer | php -- \
-        --filename=composer \
-        --install-dir=/usr/local/bin && \
-        echo "alias composer='composer'" >> /root/.bashrc
-
-RUN wget -qO- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.5/install.sh | bash
-
-RUN echo 'export NVM_DIR="$HOME/.nvm"'                                       >> "$HOME/.bashrc"
-RUN echo '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"  # This loads nvm' >> "$HOME/.bashrc"
-RUN echo '[ -s "$NVM_DIR/bash_completion" ] && . "$NVM_DIR/bash_completion" # This loads nvm bash_completion' >> "$HOME/.bashrc"
-
-RUN bash -c 'source $HOME/.nvm/nvm.sh   && \
-    nvm install stable && nvm use stable';
-
-
-VOLUME /tmp
-
-# Fix fucking permissions
+# FPM workers run as the WSL user that owns the app files.
 ARG PUID=1000
 ARG PGID=1000
+RUN groupmod -g ${PGID} www-data && usermod -u ${PUID} -g ${PGID} www-data
 
-# Ensure group exists or adjust it
-RUN if getent group www-data >/dev/null; then \
-      groupmod -g ${PGID} www-data; \
-    else \
-      groupadd -g ${PGID} www-data; \
-    fi \
- && usermod -u ${PUID} -g ${PGID} www-data
-	
-	
-CMD ["sh", "-c", "composer self-update && php-fpm"]
+CMD ["php-fpm"]

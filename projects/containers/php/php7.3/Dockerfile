@@ -1,88 +1,33 @@
-FROM php:7.3-fpm-buster
+# PHP 7.3.33 from php-eol-patched (github.com/RCooLeR/php-eol-patched): the official image with
+# selected security backports compiled in, plus what the local sites need on top.
+# Settings come from conf/.
+FROM ghcr.io/rcooler/php-eol-patched:7.3.33-debian
 
-# Full replace: Debian Buster archive repos
-RUN set -eux; \
-    printf '%s\\n' \
-      'deb http://archive.debian.org/debian buster main contrib non-free' \
-      'deb http://archive.debian.org/debian buster-updates main contrib non-free' \
-      'deb http://archive.debian.org/debian-security buster/updates main contrib non-free' \
-      > /etc/apt/sources.list; \
-    echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
-	
-COPY ./conf/php.ini /usr/local/etc/php/
-COPY ./conf/www.conf /usr/local/etc/php-fpm.d/www.conf
+COPY conf/php.ini /usr/local/etc/php/
+COPY conf/www.conf /usr/local/etc/php-fpm.d/www.conf
+# conf.d is read after php.ini, so the image's production defaults would override it.
+RUN rm -f /usr/local/etc/php/conf.d/00-defaults.ini
 
-RUN apt-get update && apt-get install -y git \
-	libmemcached-dev \
-	libmemcached11 \
-	wget \
-    	libmemcached-dev \
-    	libfreetype6-dev \
-    	libjpeg62-turbo-dev \
-    	libmcrypt-dev \
-    	libpng-dev \
-    	imagemagick \
-	&& docker-php-ext-install pdo \
-	&& docker-php-ext-install mbstring \
-	&& docker-php-ext-install pdo_mysql \
-	&& docker-php-ext-install mysqli \
-	&& docker-php-ext-install opcache \
-	&& docker-php-ext-configure gd --with-png-dir=/usr --with-jpeg-dir=/usr \
-	&& docker-php-ext-install gd
+RUN apt-get update && apt-get install -y --no-install-recommends $PHPIZE_DEPS \
+        git wget imagemagick zbar-tools mariadb-client libgmp-dev libsodium-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN pecl install redis-4.3.0 \
-	    && pecl install xdebug-2.9.8 \
-	    && docker-php-ext-enable redis
+# Bundled extensions the image leaves out, built from its patched source archive.
+RUN [ -e /usr/include/gmp.h ] || ln -s /usr/include/$(gcc -print-multiarch)/gmp.h /usr/include/gmp.h; \
+    docker-php-ext-install gmp ftp posix sodium
 
-			RUN pecl install memcached \
-&& docker-php-ext-enable memcached
+# PECL packages from their release URLs: this PEAR cannot parse pecl.php.net's chunked answers.
+RUN pecl install https://pecl.php.net/get/xdebug-3.1.6.tgz \
+    && docker-php-ext-enable xdebug
 
-RUN apt-get update && apt-get install  -y libgmp-dev
-RUN ln -s /usr/include/$(gcc -print-multiarch)/gmp.h /usr/include/gmp.h
-RUN docker-php-ext-install gmp
+# WP-CLI is pinned before a release drops this PHP version.
+RUN curl -fsSL https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer \
+    && curl -fsSL -o /usr/local/bin/wp https://github.com/wp-cli/wp-cli/releases/download/v2.12.0/wp-cli-2.12.0.phar \
+    && chmod +x /usr/local/bin/wp
 
-RUN apt-get install -y libzip-dev \
-	zip
-RUN docker-php-ext-configure zip --with-libzip
-RUN docker-php-ext-install zip && docker-php-ext-enable zip
-
-RUN apt-get update -y \
-&& apt-get install -y \
-libxml2-dev \
-&& apt-get clean -y \
-&& docker-php-ext-install soap
-
-RUN apt-get update && apt-get install -y libmagickwand-dev --no-install-recommends && rm -rf /var/lib/apt/lists/*
-RUN pecl install imagick && docker-php-ext-enable imagick
-
-RUN apt-get update && apt-get install -y zbar-tools
-RUN docker-php-ext-install bcmath
-RUN docker-php-ext-enable xdebug
-
-RUN  curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar && \
-		 chmod +x wp-cli.phar && \
-		 mv wp-cli.phar /usr/local/bin/wp && \
-		 echo "alias wp='wp'" >> /root/.bashrc && \
-		 wp --info
-
-RUN curl -sS https://getcomposer.org/installer | php -- \
-        --filename=composer \
-        --install-dir=/usr/local/bin && \
-        echo "alias composer='composer'" >> /root/.bashrc
-
-VOLUME /tmp
-
-# Fix fucking permissions
+# FPM workers run as the WSL user that owns the app files.
 ARG PUID=1000
 ARG PGID=1000
+RUN groupmod -g ${PGID} www-data && usermod -u ${PUID} -g ${PGID} www-data
 
-# Ensure group exists or adjust it
-RUN if getent group www-data >/dev/null; then \
-      groupmod -g ${PGID} www-data; \
-    else \
-      groupadd -g ${PGID} www-data; \
-    fi \
- && usermod -u ${PUID} -g ${PGID} www-data
-	
-	
-CMD ["sh", "-c", "composer self-update && php-fpm"]
+CMD ["php-fpm"]

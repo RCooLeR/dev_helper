@@ -45,7 +45,7 @@ RUN docker-php-ext-configure zip && docker-php-ext-install zip  && docker-php-ex
 
 RUN apt-get install -y pkg-config build-essential autoconf bison re2c libxml2-dev libsqlite3-dev
 
-RUN curl -L -o /usr/local/bin/pickle https://github.com/FriendsOfPHP/pickle/releases/download/v0.7.9/pickle.phar \
+RUN curl -L -o /usr/local/bin/pickle https://github.com/FriendsOfPHP/pickle/releases/download/v0.7.11/pickle.phar \
 	&& chmod +x /usr/local/bin/pickle
 
 RUN apt-get -y install libmagickwand-dev ghostscript  --no-install-recommends \
@@ -88,7 +88,7 @@ RUN curl -sS https://getcomposer.org/installer | php -- \
         echo "alias composer='composer'" >> /root/.bashrc && \
         composer self-update
 
-RUN wget -qO- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+RUN wget -qO- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.8/install.sh | bash
 
 RUN echo 'export NVM_DIR="$HOME/.nvm"'                                       >> "$HOME/.bashrc"
 RUN echo '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"  # This loads nvm' >> "$HOME/.bashrc"
@@ -114,9 +114,11 @@ RUN docker-php-ext-install sockets
 
 RUN apt-get -y install unixodbc-dev
 RUN pecl channel-update pecl.php.net
-RUN pecl install pdo_sqlsrv-5.11.1 sqlsrv-5.11.1
-RUN printf "; priority=20\nextension=sqlsrv.so\n" > /usr/local/etc/php/conf.d/sqlsrv.ini
-RUN printf "; priority=20\nextension=pdo_sqlsrv.so\n" > /usr/local/etc/php/conf.d/pdo_sqlsrv.ini
+# Install and verify each PHP 8.3-compatible driver before completing the image.
+RUN pecl install pdo_sqlsrv-5.13.3 \
+    && pecl install sqlsrv-5.13.3 \
+    && docker-php-ext-enable sqlsrv pdo_sqlsrv \
+    && php -r 'exit(extension_loaded("sqlsrv") && extension_loaded("pdo_sqlsrv") ? 0 : 1);'
 
 RUN apt-get install unixodbc unixodbc-dev -y \
  && docker-php-ext-configure pdo_odbc --with-pdo-odbc=unixODBC,/usr \
@@ -151,4 +153,5 @@ RUN if getent group www-data >/dev/null; then \
     fi \
  && usermod -u ${PUID} -g ${PGID} www-data
 	
-CMD ["sh", "-c", "composer self-update && php-fpm"]
+# Keep FPM startup independent of network access and Composer updates.
+CMD ["php-fpm"]

@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y git mc\
     	libmemcached-dev \
 			libfreetype6-dev \
 			libjpeg62-turbo-dev \
+			libwebp-dev \
 			 libmcrypt-dev \
 			 libpng-dev \
 			 zlib1g-dev \
@@ -27,7 +28,7 @@ RUN apt-get update && apt-get install -y git mc\
 			 pkg-config build-essential autoconf bison re2c libxml2-dev libsqlite3-dev \
 			 libicu-dev \
 	&& docker-php-ext-install opcache \
-	&& docker-php-ext-configure gd --with-freetype --with-jpeg \
+	&& docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
 	&& docker-php-ext-install -j$(nproc) gd \
 	&& docker-php-ext-install pdo \
 	&& docker-php-ext-install mbstring \
@@ -78,7 +79,7 @@ RUN pecl install imagick; \
 		&& apt-get clean \
 		&& rm -r /var/lib/apt/lists/*
 
-RUN docker-php-ext-install bcmath
+RUN docker-php-ext-install bcmath calendar
 RUN pecl install xdebug
 RUN docker-php-ext-enable xdebug
 
@@ -94,7 +95,7 @@ RUN curl --cacert /etc/ssl/certs/ca-certificates.crt -sS https://getcomposer.org
         echo "alias composer='composer'" >> /root/.bashrc && \
         composer self-update
 
-RUN wget -qO- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+RUN wget -qO- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.8/install.sh | bash
 
 RUN echo 'export NVM_DIR="$HOME/.nvm"'                                       >> "$HOME/.bashrc"
 RUN echo '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"  # This loads nvm' >> "$HOME/.bashrc"
@@ -158,4 +159,5 @@ RUN if getent group www-data >/dev/null; then \
     fi \
  && usermod -u ${PUID} -g ${PGID} www-data
 
-CMD ["sh", "-c", "composer self-update && php-fpm"]
+# Keep FPM startup independent of network access and Composer updates.
+CMD ["php-fpm"]

@@ -45,7 +45,7 @@ RUN docker-php-ext-configure zip && docker-php-ext-install zip  && docker-php-ex
 
 RUN apt-get install -y pkg-config build-essential autoconf bison re2c libxml2-dev libsqlite3-dev
 
-RUN curl -L -o /usr/local/bin/pickle https://github.com/FriendsOfPHP/pickle/releases/download/v0.7.9/pickle.phar \
+RUN curl -L -o /usr/local/bin/pickle https://github.com/FriendsOfPHP/pickle/releases/download/v0.7.11/pickle.phar \
 	&& chmod +x /usr/local/bin/pickle
 
 RUN apt-get -y install libmagickwand-dev ghostscript  --no-install-recommends \
@@ -88,7 +88,7 @@ RUN curl -sS https://getcomposer.org/installer | php -- \
         echo "alias composer='composer'" >> /root/.bashrc && \
         composer self-update
 
-RUN wget -qO- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+RUN wget -qO- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.8/install.sh | bash
 
 RUN echo 'export NVM_DIR="$HOME/.nvm"'                                       >> "$HOME/.bashrc"
 RUN echo '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"  # This loads nvm' >> "$HOME/.bashrc"
@@ -112,4 +112,5 @@ RUN if getent group www-data >/dev/null; then \
  && usermod -u ${PUID} -g ${PGID} www-data
 	
 	
-CMD ["sh", "-c", "composer self-update && php-fpm"]
+# Keep FPM startup independent of network access and Composer updates.
+CMD ["php-fpm"]

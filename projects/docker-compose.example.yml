@@ -90,12 +90,21 @@ services:
     image: memcached:1.6-alpine
     ports: ["11211:11211"]
 
-  php71: { build: ./containers/php/php7.1, volumes: ["${APPS_ROOT}:/var/www/apps"], working_dir: /var/www/apps}
-  php72: { build: ./containers/php/php7.2, volumes: ["${APPS_ROOT}:/var/www/apps"], working_dir: /var/www/apps }
-  php73: { build: ./containers/php/php7.3, volumes: ["${APPS_ROOT}:/var/www/apps"], working_dir: /var/www/apps }
-  php74: { build: ./containers/php/php7.4, volumes: ["${APPS_ROOT}:/var/www/apps"], working_dir: /var/www/apps }
-  php80: { build: ./containers/php/php8.0, volumes: ["${APPS_ROOT}:/var/www/apps"], working_dir: /var/www/apps }
-  php81: { build: ./containers/php/php8.1, volumes: ["${APPS_ROOT}:/var/www/apps"], working_dir: /var/www/apps }
+  # PHP 5.6 to 8.1 build on the latest ghcr.io/rcooler/php-eol-patched <release>-debian images (pull: true):
+  # the official images with selected security backports compiled in (github.com/RCooLeR/php-eol-patched).
+  # Only 7.1, 7.2 and 8.0 are enabled. To enable another version, uncomment it and add it to
+  # SupportedPHPVersions in internal/provision/provision.go. FastCGI has no authentication: keep FPM on loopback.
+#  php56: { build: { context: ./containers/php/php5.6, pull: true }, ports: ["127.0.0.1:9156:9000"], volumes: ["${APPS_ROOT}:/var/www/apps"], working_dir: /var/www/apps }
+#  php70: { build: { context: ./containers/php/php7.0, pull: true }, ports: ["127.0.0.1:9170:9000"], volumes: ["${APPS_ROOT}:/var/www/apps"], working_dir: /var/www/apps }
+  php71: { build: { context: ./containers/php/php7.1, pull: true }, ports: ["127.0.0.1:9171:9000"], volumes: ["${APPS_ROOT}:/var/www/apps"], working_dir: /var/www/apps }
+  php72: { build: { context: ./containers/php/php7.2, pull: true }, ports: ["127.0.0.1:9172:9000"], volumes: ["${APPS_ROOT}:/var/www/apps"], working_dir: /var/www/apps }
+#  php73: { build: { context: ./containers/php/php7.3, pull: true }, ports: ["127.0.0.1:9173:9000"], volumes: ["${APPS_ROOT}:/var/www/apps"], working_dir: /var/www/apps }
+#  php74: { build: { context: ./containers/php/php7.4, pull: true }, ports: ["127.0.0.1:9174:9000"], volumes: ["${APPS_ROOT}:/var/www/apps"], working_dir: /var/www/apps }
+  php80: { build: { context: ./containers/php/php8.0, pull: true }, ports: ["127.0.0.1:9180:9000"], volumes: ["${APPS_ROOT}:/var/www/apps"], working_dir: /var/www/apps }
+#  php81: { build: { context: ./containers/php/php8.1, pull: true }, ports: ["127.0.0.1:9181:9000"], volumes: ["${APPS_ROOT}:/var/www/apps"], working_dir: /var/www/apps }
   php82: { build: ./containers/php/php8.2, volumes: ["${APPS_ROOT}:/var/www/apps"], working_dir: /var/www/apps }
   php83: { build: ./containers/php/php8.3, volumes: ["${APPS_ROOT}:/var/www/apps"], working_dir: /var/www/apps }
   php84: { build: ./containers/php/php8.4, volumes: ["${APPS_ROOT}:/var/www/apps"], working_dir: /var/www/apps }
+  php85: { build: ./containers/php/php8.5, volumes: ["${APPS_ROOT}:/var/www/apps"], working_dir: /var/www/apps }
+  # PHP 8.6 builds from the release-candidate image until 8.6.0 is published (see its Dockerfile).
+  php86: { build: ./containers/php/php8.6, volumes: ["${APPS_ROOT}:/var/www/apps"], working_dir: /var/www/apps }
