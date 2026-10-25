@@ -8,8 +8,8 @@
   },
   "dependencies": {
     "bootstrap": "5.3.8",
-    "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
   },
   "devDependencies": {
     "esbuild": "0.28.2"
