@@ -141,5 +141,3 @@ go vet ./cmd/... ./internal/...
 Use these scoped package patterns in a working development stack: `./...` also walks potentially very large local `projects/apps` and `projects/data` directories. On a clean checkout, `go test ./...` works as usual.
 
 For UI changes, follow [frontend/README.md](frontend/README.md), rebuild the assets, then rebuild Go. The embedded React UI works without external CDN connections.
-
-See [the migration and analysis report](docs/MIGRATION_2026-09.md) for dependency versions, behavior changes, test coverage, and compatibility notes.
