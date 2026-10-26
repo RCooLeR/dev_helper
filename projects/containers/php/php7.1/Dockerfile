@@ -1,7 +1,7 @@
 # PHP 7.1.33 from php-eol-patched (github.com/RCooLeR/php-eol-patched): the official image with
 # selected security backports compiled in, plus what the local sites need on top.
 # Settings come from conf/.
-FROM ghcr.io/rcooler/php-eol-patched:7.1.33-debian
+FROM ghcr.io/rcooler/php-eol-patched:7.1.33-debian@sha256:4c1a1702969a84d7b4d7f4b0b04c45ce2d839407df53e516a468763dba319acf
 
 COPY conf/php.ini /usr/local/etc/php/
 COPY conf/www.conf /usr/local/etc/php-fpm.d/www.conf

@@ -1,7 +1,7 @@
 # PHP 8.0.30 from php-eol-patched (github.com/RCooLeR/php-eol-patched): the official image with
 # selected security backports compiled in, plus what the local sites need on top.
 # Settings come from conf/.
-FROM ghcr.io/rcooler/php-eol-patched:8.0.30-debian
+FROM ghcr.io/rcooler/php-eol-patched:8.0.30-debian@sha256:aadf968cc47f879019243dfce4d427bb3c79870f850cb4158d89d0aaed3e923d
 
 COPY conf/opcache.ini conf/z-custom.ini /usr/local/etc/php/conf.d/
 
