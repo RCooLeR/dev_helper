@@ -3,7 +3,7 @@
 The Go binary embeds the production React and Bootstrap bundles. Starting
 devhelper and using the UI require no Node.js installation or CDN connection.
 
-To edit the UI, use Node.js 22 or newer:
+To edit the UI, use Node.js 22.23.4 or newer in the 22.x line, 24.22.1 or newer in the 24.x line, or 26.12.1 or newer:
 
 ```sh
 cd frontend
