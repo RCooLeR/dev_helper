@@ -1,4 +1,4 @@
-FROM nginx:stable
+FROM nginx:1.30.6@sha256:a7675fcee220f59b4a99f7098c06a0d5d999c2c0ee37c0211efb780536e5cb20
 
 # Keep OpenSSL available for local TLS tooling.
 RUN set -eux; \
